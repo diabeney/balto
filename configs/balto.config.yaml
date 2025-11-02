@@ -1,0 +1,19 @@
+global:
+  load_balancing:
+    algorithm: round-robin
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+  logging:
+    level: info
+    path: /var/log/balto/balto.log
+  metrics:
+    path: /var/log/balto/metrics.json
+  cors:
+    enabled: false
+    allowed_origins: []
+  timeouts:
+    read: 5s
+    write: 5s
+    idle: 30s

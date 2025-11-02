@@ -1,0 +1,32 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Binaries for programs and plugins
+bin/
+pkg/
+*.a
+*.o
+
+# Test binary, build with `go test -c`
+*.test
+
+# Output of coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Node.js
+node_modules/
+plan.md
+spec.md
+npm-debug.log
+yarn-error.log
+.next/
+
+
