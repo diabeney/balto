@@ -8,9 +8,9 @@
 
 # Binaries for programs and plugins
 bin/
-pkg/
 *.a
 *.o
+balto
 
 # Test binary, build with `go test -c`
 *.test
