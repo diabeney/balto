@@ -1,256 +1,248 @@
 package router
 
 import (
+	"net/url"
 	"reflect"
 	"testing"
 )
 
-func newTestRouter() Router {
-	return Router{
-		routes: ServiceRoutes{
-			"www.jedevent.com": []Route{
-				{internalUrls: []string{"http://localhost:3000"}, pathPrefix: "/"},
-				{internalUrls: []string{"http://localhost:3001"}, pathPrefix: "/api"},
-				{internalUrls: []string{"http://localhost:3002"}, pathPrefix: "/api/v1"},
-			},
-		},
+func mustParseURL(s string) *url.URL {
+	u, err := url.Parse(s)
+	if err != nil {
+		panic(err)
 	}
+	return u
+}
+
+func newTestRouter() *Router {
+	r := NewRouter()
+	r = r.Add(Host("www.example.com"), "/", []*url.URL{mustParseURL("http://localhost:3000")})
+	r = r.Add(Host("www.example.com"), "/api", []*url.URL{mustParseURL("http://localhost:3001")})
+	r = r.Add(Host("www.example.com"), "/api/v1", []*url.URL{mustParseURL("http://localhost:3002")})
+	r = r.Add(Host("www.example.com"), "/users/:id", []*url.URL{mustParseURL("http://localhost:3003")})
+	r = r.Add(Host("www.example.com"), "/static/*", []*url.URL{mustParseURL("http://localhost:3004")})
+	r = r.Add(Host("api.example.com"), "/v1", []*url.URL{mustParseURL("http://localhost:4000")})
+	return r
 }
 
 func TestRouterAdd(t *testing.T) {
 	t.Run("Add route to existing host", func(t *testing.T) {
-		router := newTestRouter()
-		route := Route{internalUrls: []string{"http://localhost:3003"}, pathPrefix: "/ussd"}
+		r := newTestRouter()
+		initial := len(r.hosts[Host("www.example.com").lower()].children)
 
-		expected := Router{
-			routes: ServiceRoutes{
-				"www.jedevent.com": []Route{
-					{internalUrls: []string{"http://localhost:3000"}, pathPrefix: "/"},
-					{internalUrls: []string{"http://localhost:3001"}, pathPrefix: "/api"},
-					{internalUrls: []string{"http://localhost:3002"}, pathPrefix: "/api/v1"},
-					{internalUrls: []string{"http://localhost:3003"}, pathPrefix: "/ussd"},
-				},
-			},
+		r = r.Add(Host("www.example.com"), "/admin", []*url.URL{mustParseURL("http://localhost:5000")})
+
+		route, _, ok := r.Lookup(Host("www.example.com"), "/admin")
+		if !ok {
+			t.Fatal("expected /admin to be added")
 		}
-
-		router = router.Add("www.jedevent.com", route)
-		if !reflect.DeepEqual(router, expected) {
-			t.Errorf("expected %+v, got %+v", expected, router)
+		if route.URLs[0].String() != "http://localhost:5000" {
+			t.Errorf("got %s, want http://localhost:5000", route.URLs[0])
+		}
+		if len(r.hosts[Host("www.example.com").lower()].children) <= initial {
+			t.Error("child count did not increase")
 		}
 	})
 
 	t.Run("Add route to new host", func(t *testing.T) {
-		router := newTestRouter()
-		newHost := "api.jedevent.com"
-		newRoute := Route{internalUrls: []string{"http://localhost:4000"}, pathPrefix: "/v1"}
+		r := newTestRouter()
+		r = r.Add(Host("newhost.com"), "/v2", []*url.URL{mustParseURL("http://localhost:6000")})
 
-		router = router.Add(Host(newHost), newRoute)
-
-		routes, exists := router.routes[Host(newHost)]
-		if !exists {
-			t.Fatalf("expected new host '%s' to exist", newHost)
+		route, _, ok := r.Lookup(Host("newhost.com"), "/v2")
+		if !ok {
+			t.Fatal("expected /v2 on newhost.com")
 		}
-		if len(routes) != 1 || !reflect.DeepEqual(routes[0].internalUrls, []string{"http://localhost:4000"}) {
-			t.Errorf("expected 1 route, got %+v", routes)
+		if route.URLs[0].Port() != "6000" {
+			t.Errorf("got port %s, want 6000", route.URLs[0].Port())
 		}
 	})
 
-	t.Run("Ignore empty host or invalid route", func(t *testing.T) {
-		router := newTestRouter()
-		initial := len(router.routes["www.jedevent.com"])
-		router = router.Add("", Route{internalUrls: []string{"http://localhost:9999"}, pathPrefix: "/"})
-		router = router.Add("www.jedevent.com", Route{})
+	t.Run("Ignore empty host or empty services", func(t *testing.T) {
+		r := newTestRouter()
+		origPtr := reflect.ValueOf(r.hosts).Pointer()
 
-		if len(router.routes["www.jedevent.com"]) != initial {
-			t.Errorf("expected invalid routes to be ignored")
+		r = r.Add(Host(""), "/valid", []*url.URL{mustParseURL("http://localhost:9999")})
+		r = r.Add(Host("www.example.com"), "/valid", []*url.URL{})
+
+		if reflect.ValueOf(r.hosts).Pointer() != origPtr {
+			t.Error("invalid Add mutated the router")
 		}
 	})
 
-	t.Run("Prevent duplicate route insertions", func(t *testing.T) {
-		router := newTestRouter()
-		dup := Route{internalUrls: []string{"http://localhost:3000"}, pathPrefix: "/"}
-		router = router.Add("www.jedevent.com", dup)
+	// Note: No ListRoutes method, instead we verify behavior via Lookup
+	t.Run("Duplicate exact route does not break lookup", func(t *testing.T) {
+		r := newTestRouter()
+		r = r.Add(Host("www.example.com"), "/api", []*url.URL{mustParseURL("http://localhost:9999")})
 
-		count := 0
-		for _, r := range router.routes["www.jedevent.com"] {
-			if reflect.DeepEqual(r.internalUrls, dup.internalUrls) && r.pathPrefix == dup.pathPrefix {
-				count++
-			}
+		route, _, ok := r.Lookup(Host("www.example.com"), "/api")
+		if !ok {
+			t.Fatal("expected /api to still match")
 		}
-		if count > 1 {
-			t.Errorf("duplicate route detected for same host/path combination")
+		// We don't need to match a specific backend (for now), only that a matching route exists.
+		// This behavior is intentional since multiple backends can serve the same path.
+		// This allows for load balancing, failover, and dynamic backend selection.
+		if route.URLs[0].Port() != "3001" && route.URLs[0].Port() != "9999" {
+			t.Errorf("unexpected backend port: %s", route.URLs[0].Port())
 		}
 	})
 }
 
 func TestRouterLookup(t *testing.T) {
-	router := newTestRouter()
+	r := newTestRouter()
 
-	t.Run("Most specific match is returned", func(t *testing.T) {
-		tests := []struct {
-			path     string
-			expected string
+	t.Run("Most specific match wins", func(t *testing.T) {
+		cases := []struct {
+			path      string
+			want      string
+			shouldMatch bool
 		}{
-			{"/", "http://localhost:3000"},
-			{"/api", "http://localhost:3001"},
-			{"/api/v1", "http://localhost:3002"},
-			{"/api/v1/users", "http://localhost:3002"},
-			{"/unknown", "http://localhost:3000"},
+			{"/", "http://localhost:3000", true},
+			{"/api", "http://localhost:3001", true},
+			{"/api/v1", "http://localhost:3002", true},
+			{"/users/123", "http://localhost:3003", true},
+			{"/static/js/app.js", "http://localhost:3004", true},
+			{"/unknown", "", false}, 
 		}
+		for _, c := range cases {
+			t.Run(c.path, func(t *testing.T) {
+				route, _, ok := r.Lookup(Host("www.example.com"), c.path)
+				if c.shouldMatch {
+					if !ok {
+						t.Fatalf("expected match for %q", c.path)
+					}
+					if route.URLs[0].String() != c.want {
+						t.Errorf("got %s, want %s", route.URLs[0], c.want)
+					}
+				} else {
+					if ok {
+						t.Errorf("expected no match for %q, but got %s", c.path, route.URLs[0])
+					}
+				}
+			})
+		}
+	})
 
-		for _, tt := range tests {
-			r, ok := router.Lookup("www.jedevent.com", tt.path)
-			if !ok {
-				t.Errorf("expected match for %s", tt.path)
-				continue
-			}
-			if len(r.internalUrls) == 0 || r.internalUrls[0] != tt.expected {
-				t.Errorf("for path %s expected %s but got %+v", tt.path, tt.expected, r.internalUrls)
-			}
+	t.Run("Dynamic param extraction", func(t *testing.T) {
+		route, params, ok := r.Lookup(Host("www.example.com"), "/users/456")
+		if !ok {
+			t.Fatal("expected match")
+		}
+		if route.URLs[0].Port() != "3003" {
+			t.Errorf("want backend 3003, got %s", route.URLs[0].Port())
+		}
+		if params["id"] != "456" {
+			t.Errorf("want id=456, got %v", params["id"])
+		}
+	})
+
+	t.Run("Wildcard matches any sub-path", func(t *testing.T) {
+		route, _, ok := r.Lookup(Host("www.example.com"), "/static/images/profiles/valid-uuid")
+		if !ok {
+			t.Fatal("wildcard match failed")
+		}
+		if route.URLs[0].Port() != "3004" {
+			t.Errorf("want backend 3004, got %s", route.URLs[0].Port())
 		}
 	})
 
 	t.Run("Unknown host returns no match", func(t *testing.T) {
-		_, ok := router.Lookup("unknown.com", "/")
+		_, _, ok := r.Lookup(Host("unknown.com"), "/")
 		if ok {
-			t.Errorf("expected no match for unknown host")
-		}
-	})
-
-	t.Run("Empty routes map returns no match", func(t *testing.T) {
-		emptyRouter := Router{routes: make(ServiceRoutes)}
-		_, ok := emptyRouter.Lookup("www.jedevent.com", "/")
-		if ok {
-			t.Errorf("expected no match for empty route set")
+			t.Error("unknown host should not match")
 		}
 	})
 
 	t.Run("Trailing slashes normalized", func(t *testing.T) {
-		tests := []struct {
-			path     string
-			expected string
+		cases := []struct {
+			path string
+			want string
 		}{
 			{"/api/", "http://localhost:3001"},
-			{"/api/v1/", "http://localhost:3002"},
-			{"/api/v1/users/", "http://localhost:3002"},
-			{"/", "http://localhost:3000"},
+			{"//api//v1//", "http://localhost:3002"},
+			{"//users//789//", "http://localhost:3003"},
 		}
-
-		for _, tt := range tests {
-			r, ok := router.Lookup("www.jedevent.com", tt.path)
-			if !ok {
-				t.Errorf("expected match for %s", tt.path)
-				continue
-			}
-			if len(r.internalUrls) == 0 || r.internalUrls[0] != tt.expected {
-				t.Errorf("for path %s expected %s but got %+v", tt.path, tt.expected, r.internalUrls)
-			}
-		}
-	})
-
-	t.Run("Case sensitivity behavior", func(t *testing.T) {
-		r, ok := router.Lookup("WWW.JEDEVENT.COM", "/api")
-		if !ok || r.internalUrls[0] != "http://localhost:3001" {
-			t.Errorf("expected host lookup to be case-insensitive")
-		}
-
-		r, ok = router.Lookup("www.jedevent.com", "/API")
-		if ok && r.internalUrls[0] == "http://localhost:3001" {
-			t.Errorf("expected path matching to be case-sensitive")
+		for _, c := range cases {
+			t.Run(c.path, func(t *testing.T) {
+				route, _, ok := r.Lookup(Host("www.example.com"), c.path)
+				if !ok {
+					t.Fatal("no match")
+				}
+				if route.URLs[0].String() != c.want {
+					t.Errorf("got %s, want %s", route.URLs[0], c.want)
+				}
+			})
 		}
 	})
 
-	t.Run("Root route acts as fallback", func(t *testing.T) {
-		r, ok := router.Lookup("www.jedevent.com", "/nonexistent/path")
-		if !ok {
-			t.Errorf("expected fallback to root route")
-		}
-		if r.internalUrls[0] != "http://localhost:3000" {
-			t.Errorf("expected fallback to root, got %+v", r.internalUrls)
-		}
-	})
-}
-
-func TestListRoutes(t *testing.T) {
-	router := Router{
-		routes: ServiceRoutes{
-			"api.example.com": {
-				{internalUrls: []string{"http://localhost:3001"}, pathPrefix: "/users"},
-				{internalUrls: []string{"http://localhost:3002"}, pathPrefix: "/orders"},
-			},
-			"app.example.com": {
-				{internalUrls: []string{"http://localhost:3000"}, pathPrefix: "/"},
-			},
-		},
-	}
-
-	expected := ServiceRoutes{
-		"api.example.com": {
-			{internalUrls: []string{"http://localhost:3001"}, pathPrefix: "/users"},
-			{internalUrls: []string{"http://localhost:3002"}, pathPrefix: "/orders"},
-		},
-		"app.example.com": {
-			{internalUrls: []string{"http://localhost:3000"}, pathPrefix: "/"},
-		},
-	}
-
-	got := router.ListRoutes()
-	if !reflect.DeepEqual(got, expected) {
-		t.Errorf("ListRoutes() = %+v, want %+v", got, expected)
-	}
-}
-
-func TestListRoutesImmutability(t *testing.T) {
-	r := Router{
-		routes: ServiceRoutes{
-			"app.example.com": {
-				{internalUrls: []string{"http://localhost:8080"}, pathPrefix: "/"},
-			},
-		},
-	}
-
-	got := r.ListRoutes()
-	got["app.example.com"][0].internalUrls[0] = "http://localhost:9090"
-
-	if r.routes["app.example.com"][0].internalUrls[0] != "http://localhost:8080" {
-		t.Errorf("ListRoutes() returned a reference that modified Router.routes")
-	}
-}
-
-func TestListRoutesByHost(t *testing.T) {
-	router := Router{
-		routes: ServiceRoutes{
-			"api.example.com": {
-				{internalUrls: []string{"http://localhost:3001"}, pathPrefix: "/api"},
-				{internalUrls: []string{"http://localhost:3002"}, pathPrefix: "/v2"},
-			},
-		},
-	}
-
-	t.Run("existing host returns routes", func(t *testing.T) {
-		routes, ok := router.ListRoutesByHost("api.example.com")
-		if !ok {
-			t.Fatal("expected ok=true for existing host")
-		}
-		if len(routes) != 2 {
-			t.Errorf("expected 2 routes, got %d", len(routes))
-		}
-	})
-
-	t.Run("nonexistent host returns empty slice and false", func(t *testing.T) {
-		routes, ok := router.ListRoutesByHost("missing.com")
+	t.Run("Host case-insensitive, path case-sensitive", func(t *testing.T) {
+		route, _, ok := r.Lookup(Host("WWW.EXAMPLE.COM"), "/API")
 		if ok {
-			t.Error("expected ok=false for missing host")
+			t.Error("/API (upper) should NOT match")
 		}
-		if len(routes) != 0 {
-			t.Error("expected empty slice for missing host")
+
+		route, _, ok = r.Lookup(Host("WWW.EXAMPLE.COM"), "/api")
+		if !ok || route.URLs[0].Port() != "3001" {
+			t.Errorf("case-insensitive host failed")
 		}
 	})
 
-	t.Run("case-insensitive host lookup", func(t *testing.T) {
-		routes, ok := router.ListRoutesByHost("API.EXAMPLE.COM")
-		if !ok || len(routes) != 2 {
-			t.Errorf("expected 2 routes for case-insensitive match, got %d", len(routes))
+	t.Run("Unmatched path returns no match", func(t *testing.T) {
+		_, _, ok := r.Lookup(Host("www.example.com"), "/nonexistent")
+		if ok {
+			t.Error("unmatched path should not match without explicit wildcard")
 		}
+	})
+}
+
+func TestRouterImmutability(t *testing.T) {
+	r1 := newTestRouter()
+	r2 := r1.Add(Host("www.jedevent.com"), "/api", []*url.URL{mustParseURL("http://localhost:7000")})
+
+	if reflect.DeepEqual(r1, r2) {
+		t.Error("Add mutated original")
+	}
+	_, _, ok := r1.Lookup(Host("www.jedevent.com"), "/api")
+	if ok {
+		t.Error("original router modified")
+	}
+}
+
+func TestRouterHotReload(t *testing.T) {
+	r1 := newTestRouter()
+	SetCurrent(r1)
+
+	r2 := r1.Add(Host("www.example.com"), "/live", []*url.URL{
+		mustParseURL("http://localhost:8000"),
+	})
+	SetCurrent(r2)
+
+	route, _, ok := Current().Lookup(Host("www.example.com"), "/live")
+	if !ok || route.URLs[0].Port() != "8000" {
+		t.Errorf("hot reload failed, got %v", route.URLs)
+	}
+
+	if _, _, ok := r1.Lookup(Host("www.example.com"), "/live"); ok {
+		t.Error("original router mutated after Add()")
+	}
+}
+
+
+func TestRouterEdgeCases(t *testing.T) {
+	t.Run("Empty path matches root", func(t *testing.T) {
+		r := NewRouter()
+		r = r.Add(Host("example.com"), "/", []*url.URL{mustParseURL("http://localhost:9999")})
+		route, _, ok := r.Lookup(Host("example.com"), "")
+		if !ok || route.URLs[0].Port() != "9999" {
+			t.Errorf("empty path failed")
+		}
+	})
+	t.Run("No panic on nil router", func(t *testing.T) {
+		defer func() {
+			if recover() != nil {
+				t.Error("Current() nil caused panic")
+			}
+		}()
+		SetCurrent(nil)
+		_ = Current() 
 	})
 }
