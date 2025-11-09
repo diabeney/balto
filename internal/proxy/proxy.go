@@ -57,7 +57,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-
 	target, err := route.FirstURL()
 	if err != nil {
 		http.Error(w, "invalid backend url", http.StatusBadGateway)
@@ -127,9 +126,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}()
 
 	if flusher, ok := w.(http.Flusher); ok {
-		io.Copy(flushWriter{w, flusher}, resp.Body)
+		if _, err := io.Copy(flushWriter{w, flusher}, resp.Body); err != nil {
+			fmt.Printf("[PROXY] Error copying response body: %v\n", err)
+		}
 	} else {
-		io.Copy(w, resp.Body)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			fmt.Printf("[PROXY] Error copying response body: %v\n", err)
+		}
 	}
 	close(done)
 

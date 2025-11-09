@@ -15,7 +15,6 @@ import (
 	"github.com/diabeney/balto/internal/router"
 )
 
-
 func setupTestBackend(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +24,7 @@ func setupTestBackend(t *testing.T) *httptest.Server {
 		w.Header().Set("X-Received-Path", r.URL.Path)
 		w.Header().Set("X-Param-Id", r.Header.Get("X-Param-id"))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("echo: " + string(body)))
+		_, _ = w.Write([]byte("echo: " + string(body)))
 	}))
 }
 
@@ -150,7 +149,7 @@ func TestProxyCancelsBackendRequestOnClientClose(t *testing.T) {
 			sawCancel <- true
 			return
 		case <-time.After(5 * time.Second):
-			io.WriteString(w, "done")
+			_, _ = io.WriteString(w, "done")
 		}
 	}))
 	defer backend.Close()
@@ -267,7 +266,7 @@ func TestProxyHotReload(t *testing.T) {
 	}
 	rt1, _ := router.BuildFromConfig(cfg1)
 
-	p := proxy.New(rt1) 
+	p := proxy.New(rt1)
 	proxyServer := httptest.NewServer(http.HandlerFunc(p.ServeHTTP))
 	defer proxyServer.Close()
 

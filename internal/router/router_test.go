@@ -92,8 +92,8 @@ func TestRouterLookup(t *testing.T) {
 
 	t.Run("Most specific match wins", func(t *testing.T) {
 		cases := []struct {
-			path      string
-			want      string
+			path        string
+			want        string
 			shouldMatch bool
 		}{
 			{"/", "http://localhost:3000", true},
@@ -101,7 +101,7 @@ func TestRouterLookup(t *testing.T) {
 			{"/api/v1", "http://localhost:3002", true},
 			{"/users/123", "http://localhost:3003", true},
 			{"/static/js/app.js", "http://localhost:3004", true},
-			{"/unknown", "", false}, 
+			{"/unknown", "", false},
 		}
 		for _, c := range cases {
 			t.Run(c.path, func(t *testing.T) {
@@ -226,7 +226,6 @@ func TestRouterHotReload(t *testing.T) {
 	}
 }
 
-
 func TestRouterEdgeCases(t *testing.T) {
 	t.Run("Empty path matches root", func(t *testing.T) {
 		r := NewRouter()
@@ -243,6 +242,6 @@ func TestRouterEdgeCases(t *testing.T) {
 			}
 		}()
 		SetCurrent(nil)
-		_ = Current() 
+		_ = Current()
 	})
 }

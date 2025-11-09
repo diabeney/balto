@@ -1,0 +1,43 @@
+#!/bin/bash
+
+set -e
+
+# Run go fmt to format code
+echo "Running go fmt..."
+go fmt ./...
+
+# Stage the formatted files
+git add -u
+
+GOLANGCI_LINT=""
+if command -v golangci-lint &> /dev/null; then
+    GOLANGCI_LINT="golangci-lint"
+elif [ -f "$HOME/go/bin/golangci-lint" ]; then
+    GOLANGCI_LINT="$HOME/go/bin/golangci-lint"
+elif [ -f "$GOPATH/bin/golangci-lint" ]; then
+    GOLANGCI_LINT="$GOPATH/bin/golangci-lint"
+fi
+
+if [ -z "$GOLANGCI_LINT" ]; then
+    echo "Error: golangci-lint not found in PATH or common Go bin locations."
+    echo ""
+    echo "Install it with:"
+    echo "  go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+    echo ""
+    echo "Make sure your Go bin directory is in your PATH:"
+    echo "  export PATH=\$PATH:\$(go env GOPATH)/bin"
+    echo "  # Or if using default: export PATH=\$PATH:\$HOME/go/bin"
+    echo ""
+    exit 1
+fi
+
+# Run golangci-lint
+echo "Running golangci-lint..."
+$GOLANGCI_LINT run
+if [ $? -ne 0 ]; then
+    echo "Error: linting failed. Fix the issues above or run 'make lint-fix' to auto-fix some issues."
+    exit 1
+fi
+
+echo "Pre-commit checks passed!"
+
