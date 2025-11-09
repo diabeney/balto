@@ -17,6 +17,15 @@ type Host string
 
 func (h Host) lower() Host { return Host(strings.ToLower(string(h))) }
 
+func (h Host) normalize() Host {
+	host := string(h.lower())
+	// Remove port if present
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	return Host(host)
+}
+
 type Route struct {
 	Prefix string
 	URLs   []*url.URL // This is the pre-parsed backend URLs for the route.
@@ -155,7 +164,7 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	if host == "" || len(services) == 0 {
 		return r
 	}
-	h := host.lower()
+	h := host.normalize()
 	segments := pathToSegments(normalizePrefix(path))
 	route := &Route{Prefix: path, URLs: services}
 
@@ -175,7 +184,7 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 }
 
 func (r *Router) Lookup(host Host, path string) (Route, Params, bool) {
-	root := r.hosts[host.lower()]
+	root := r.hosts[host.normalize()]
 	if root == nil {
 		return Route{}, nil, false
 	}
