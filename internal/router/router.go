@@ -32,11 +32,11 @@ func (r Route) FirstURL() (*url.URL, error) {
 type Params map[string]string
 
 type node struct {
-	segment    string 
+	segment    string
 	route      *Route
-	paramName  string           
-	isWildcard bool             
-	children   map[string]*node 
+	paramName  string
+	isWildcard bool
+	children   map[string]*node
 }
 
 func newNode(seg string) *node {

@@ -15,7 +15,7 @@ type HTTPServer struct {
 
 func New(addr string, proxyHandler http.Handler) *HTTPServer {
 	mux := http.NewServeMux()
-	
+
 	mux.Handle("/health", http.HandlerFunc(health.CheckHealth))
 	mux.Handle("/", proxyHandler)
 

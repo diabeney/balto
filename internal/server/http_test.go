@@ -11,50 +11,47 @@ import (
 )
 
 func TestHealthEndpointOK(t *testing.T) {
-    healthRoutes := []router.InitialRoutes{
-        {
-            Domain: "www.jedevent.com",
-            Ports: []string{"80"},
-            PathPrefix: "/",
-        },
-    }
-    rt, err := router.BuildFromConfig(healthRoutes);
+	healthRoutes := []router.InitialRoutes{
+		{
+			Domain:     "www.jedevent.com",
+			Ports:      []string{"80"},
+			PathPrefix: "/",
+		},
+	}
+	rt, err := router.BuildFromConfig(healthRoutes)
 
-    if err != nil {
-        t.Errorf("error building routes from config")
-    }
+	if err != nil {
+		t.Errorf("error building routes from config")
+	}
 
-    router.SetCurrent(rt)
+	router.SetCurrent(rt)
 
+	proxySrv := proxy.New(router.Current())
+	s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP))
 
-    proxySrv := proxy.New(router.Current())
-    s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP))
+	testSrv := httptest.NewServer(s.server.Handler)
+	defer testSrv.Close()
 
-    testSrv := httptest.NewServer(s.server.Handler)
-    defer testSrv.Close()
+	resp, err := http.Get(testSrv.URL + "/health")
+	if err != nil {
+		t.Fatalf("failed to GET /health: %v", err)
+	}
+	defer resp.Body.Close()
 
-    resp, err := http.Get(testSrv.URL + "/health")
-    if err != nil {
-        t.Fatalf("failed to GET /health: %v", err)
-    }
-    defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
 
-    if resp.StatusCode != http.StatusOK {
-        t.Fatalf("expected status 200, got %d", resp.StatusCode)
-    }
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected Content-Type application/json, got %q", ct)
+	}
 
-    if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
-        t.Fatalf("expected Content-Type application/json, got %q", ct)
-    }
-
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        t.Fatalf("failed to read body: %v", err)
-    }
-    expected := "{\"status\": \"ok\"}"
-    if string(body) != expected {
-        t.Fatalf("expected body %s, got %s", expected, string(body))
-    }
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read body: %v", err)
+	}
+	expected := "{\"status\": \"ok\"}"
+	if string(body) != expected {
+		t.Fatalf("expected body %s, got %s", expected, string(body))
+	}
 }
-
-
