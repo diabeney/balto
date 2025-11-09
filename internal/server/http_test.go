@@ -5,10 +5,30 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/diabeney/balto/internal/proxy"
+	"github.com/diabeney/balto/internal/router"
 )
 
 func TestHealthEndpointOK(t *testing.T) {
-    s := New(":0")
+    healthRoutes := []router.InitialRoutes{
+        {
+            Domain: "www.jedevent.com",
+            Ports: []string{"80"},
+            PathPrefix: "/",
+        },
+    }
+    rt, err := router.BuildFromConfig(healthRoutes);
+
+    if err != nil {
+        t.Errorf("error building routes from config")
+    }
+
+    router.SetCurrent(rt)
+
+
+    proxySrv := proxy.New(router.Current())
+    s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP))
 
     testSrv := httptest.NewServer(s.server.Handler)
     defer testSrv.Close()

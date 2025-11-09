@@ -5,19 +5,19 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/diabeney/balto/internal/health"
 )
 
 type HTTPServer struct {
 	server *http.Server
 }
 
-func New(addr string) *HTTPServer {
+func New(addr string, proxyHandler http.Handler) *HTTPServer {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status": "ok"}`))
-	})
+	
+	mux.Handle("/health", http.HandlerFunc(health.CheckHealth))
+	mux.Handle("/", proxyHandler)
 
 	return &HTTPServer{
 		server: &http.Server{
