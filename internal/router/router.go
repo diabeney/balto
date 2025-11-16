@@ -200,7 +200,7 @@ func (r *Router) Lookup(host Host, path string) (Route, Params, bool) {
 
 var current atomic.Pointer[Router]
 
-func SetCurrent(r *Router) { current.Store(r) }
+func SetCurrent(r *Router) { current.Store(current.Load()) }
 func Current() *Router     { return current.Load() }
 
 func normalizePrefix(p string) string {
