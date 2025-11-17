@@ -27,7 +27,6 @@ type PoolConfig struct {
 	ProbePath       string
 	Timeout         int
 	Retry           int
-	//TODO! add probe path, timeouts, retry policy and stuff
 }
 
 type BackendList struct {

@@ -18,22 +18,32 @@ type Proxy struct {
 }
 
 func New(r *router.Router) *Proxy {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+
+		MaxIdleConns:          1000,
+		MaxIdleConnsPerHost:   500, // per backend
+		MaxConnsPerHost:       0,   // let the os decide
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
 	p := &Proxy{
 		router: &atomic.Pointer[router.Router]{},
 		client: &http.Client{
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-			},
-			// Don't follow redirects, let the backend decide
+			Transport: transport,
+			Timeout:   30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
 	}
+
 	p.router.Store(r)
 	return p
 }

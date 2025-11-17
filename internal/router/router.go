@@ -179,7 +179,7 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	pool := backendpool.New(&backendpool.PoolConfig{HealthThreshold: 3}, bal)
 	for i, u := range services {
 		//TODO: Generate a unique ID for each backend service
-		pool.Add(fmt.Sprintf("%d", i), u, 1)
+		pool.Add(fmt.Sprintf("%d", i), u, 1*uint32(i))
 	}
 	route := &Route{Prefix: path, Pool: pool}
 
