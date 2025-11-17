@@ -1,8 +1,9 @@
 package balancer
 
 import (
-	"github.com/diabeney/balto/internal/core"
 	"sync/atomic"
+
+	"github.com/diabeney/balto/internal/core"
 )
 
 type RoundRobin struct {
@@ -19,6 +20,9 @@ func (r *RoundRobin) Update(backends []*core.Backend) {
 }
 
 func (r *RoundRobin) Next(backends []*core.Backend) *core.Backend {
+	if backends == nil {
+		backends = r.list
+	}
 	candidates := filterCandidates(backends)
 	if len(candidates) == 0 {
 		return nil

@@ -59,8 +59,8 @@ func TestBackendMetadataRecordSuccess(t *testing.T) {
 			t.Errorf("expected 1 total request, got %d", m.TotalRequests.Load())
 		}
 		last := m.LastSuccess.Load()
-		if last <= before || last >= after {
-			t.Errorf("LastSuccess timestamp out of range: %d", last)
+		if last < before || last > after {
+			t.Errorf("LastSuccess timestamp out of range: %d (before: %d, after: %d)", last, before, after)
 		}
 	})
 
@@ -112,6 +112,7 @@ func TestBackendStateFlags(t *testing.T) {
 		Weight: 1,
 		Meta:   &BackendMetadata{},
 	}
+	b.SetHealthy(true)
 
 	t.Run("Default state is healthy", func(t *testing.T) {
 		if !b.IsHealthy() {

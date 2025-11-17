@@ -15,6 +15,9 @@ func (w *WeightedRR) Update(backends []*core.Backend) {
 }
 
 func (w *WeightedRR) Next(backends []*core.Backend) *core.Backend {
+	if backends == nil {
+		backends = w.list
+	}
 	candidates := filterCandidates(backends)
 	if len(candidates) == 0 {
 		return nil

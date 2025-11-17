@@ -15,6 +15,9 @@ func (l *LeastConnections) Update(backends []*core.Backend) {
 }
 
 func (l *LeastConnections) Next(backends []*core.Backend) *core.Backend {
+	if backends == nil {
+		backends = l.list
+	}
 	candidates := filterCandidates(backends)
 	if len(candidates) == 0 {
 		return nil

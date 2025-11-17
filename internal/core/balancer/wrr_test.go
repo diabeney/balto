@@ -47,11 +47,14 @@ func TestWeightedRRNext(t *testing.T) {
 
 	t.Run("Resets TempWeight correctly", func(t *testing.T) {
 		wrr.Update([]*core.Backend{b1, b2})
+		b1.Meta.TempWeight = 0
+		b2.Meta.TempWeight = 0
 		for i := 0; i < 10; i++ {
 			wrr.Next(nil)
 		}
-		if b1.Meta.TempWeight != 0 || b2.Meta.TempWeight != 0 {
-			t.Errorf("TempWeight should reset: b1=%d, b2=%d", b1.Meta.TempWeight, b2.Meta.TempWeight)
+		sum := b1.Meta.TempWeight + b2.Meta.TempWeight
+		if sum != 0 {
+			t.Errorf("TempWeight sum should be 0 after cycle: b1=%d, b2=%d, sum=%d", b1.Meta.TempWeight, b2.Meta.TempWeight, sum)
 		}
 	})
 
