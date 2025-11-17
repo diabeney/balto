@@ -36,8 +36,12 @@ func TestRouterAdd(t *testing.T) {
 		if !ok {
 			t.Fatal("expected /admin to be added")
 		}
-		if route.URLs[0].String() != "http://localhost:5000" {
-			t.Errorf("got %s, want http://localhost:5000", route.URLs[0])
+		backend, err := route.NextBackend()
+		if err != nil {
+			t.Fatalf("failed to get backend: %v", err)
+		}
+		if backend.URL.String() != "http://localhost:5000" {
+			t.Errorf("got %s, want http://localhost:5000", backend.URL.String())
 		}
 		if len(r.hosts[Host("www.example.com").lower()].children) <= initial {
 			t.Error("child count did not increase")
@@ -52,8 +56,12 @@ func TestRouterAdd(t *testing.T) {
 		if !ok {
 			t.Fatal("expected /v2 on newhost.com")
 		}
-		if route.URLs[0].Port() != "6000" {
-			t.Errorf("got port %s, want 6000", route.URLs[0].Port())
+		backend, err := route.NextBackend()
+		if err != nil {
+			t.Fatalf("failed to get backend: %v", err)
+		}
+		if backend.URL.Port() != "6000" {
+			t.Errorf("got port %s, want 6000", backend.URL.Port())
 		}
 	})
 
@@ -78,11 +86,12 @@ func TestRouterAdd(t *testing.T) {
 		if !ok {
 			t.Fatal("expected /api to still match")
 		}
-		// We don't need to match a specific backend (for now), only that a matching route exists.
-		// This behavior is intentional since multiple backends can serve the same path.
-		// This allows for load balancing, failover, and dynamic backend selection.
-		if route.URLs[0].Port() != "3001" && route.URLs[0].Port() != "9999" {
-			t.Errorf("unexpected backend port: %s", route.URLs[0].Port())
+		backend, err := route.NextBackend()
+		if err != nil {
+			t.Fatalf("failed to get backend: %v", err)
+		}
+		if backend.URL.Port() != "3001" && backend.URL.Port() != "9999" {
+			t.Errorf("unexpected backend port: %s", backend.URL.Port())
 		}
 	})
 }
@@ -110,12 +119,19 @@ func TestRouterLookup(t *testing.T) {
 					if !ok {
 						t.Fatalf("expected match for %q", c.path)
 					}
-					if route.URLs[0].String() != c.want {
-						t.Errorf("got %s, want %s", route.URLs[0], c.want)
+					backend, err := route.NextBackend()
+					if err != nil {
+						t.Fatalf("failed to get backend: %v", err)
+					}
+					if backend.URL.String() != c.want {
+						t.Errorf("got %s, want %s", backend.URL.String(), c.want)
 					}
 				} else {
 					if ok {
-						t.Errorf("expected no match for %q, but got %s", c.path, route.URLs[0])
+						backend, _ := route.NextBackend()
+						if backend != nil {
+							t.Errorf("expected no match for %q, but got %s", c.path, backend.URL.String())
+						}
 					}
 				}
 			})
@@ -127,8 +143,12 @@ func TestRouterLookup(t *testing.T) {
 		if !ok {
 			t.Fatal("expected match")
 		}
-		if route.URLs[0].Port() != "3003" {
-			t.Errorf("want backend 3003, got %s", route.URLs[0].Port())
+		backend, err := route.NextBackend()
+		if err != nil {
+			t.Fatalf("failed to get backend: %v", err)
+		}
+		if backend.URL.Port() != "3003" {
+			t.Errorf("want backend 3003, got %s", backend.URL.Port())
 		}
 		if params["id"] != "456" {
 			t.Errorf("want id=456, got %v", params["id"])
@@ -140,8 +160,12 @@ func TestRouterLookup(t *testing.T) {
 		if !ok {
 			t.Fatal("wildcard match failed")
 		}
-		if route.URLs[0].Port() != "3004" {
-			t.Errorf("want backend 3004, got %s", route.URLs[0].Port())
+		backend, err := route.NextBackend()
+		if err != nil {
+			t.Fatalf("failed to get backend: %v", err)
+		}
+		if backend.URL.Port() != "3004" {
+			t.Errorf("want backend 3004, got %s", backend.URL.Port())
 		}
 	})
 
@@ -167,22 +191,34 @@ func TestRouterLookup(t *testing.T) {
 				if !ok {
 					t.Fatal("no match")
 				}
-				if route.URLs[0].String() != c.want {
-					t.Errorf("got %s, want %s", route.URLs[0], c.want)
+				backend, err := route.NextBackend()
+				if err != nil {
+					t.Fatalf("failed to get backend: %v", err)
+				}
+				if backend.URL.String() != c.want {
+					t.Errorf("got %s, want %s", backend.URL.String(), c.want)
 				}
 			})
 		}
 	})
 
 	t.Run("Host case-insensitive, path case-sensitive", func(t *testing.T) {
-		route, _, ok := r.Lookup(Host("WWW.EXAMPLE.COM"), "/API")
+		_, _, ok := r.Lookup(Host("WWW.EXAMPLE.COM"), "/API")
 		if ok {
 			t.Error("/API (upper) should NOT match")
 		}
 
-		route, _, ok = r.Lookup(Host("WWW.EXAMPLE.COM"), "/api")
-		if !ok || route.URLs[0].Port() != "3001" {
-			t.Errorf("case-insensitive host failed")
+		route, _, ok := r.Lookup(Host("WWW.EXAMPLE.COM"), "/api")
+		if !ok {
+			t.Error("case-insensitive host failed")
+		} else {
+			backend, err := route.NextBackend()
+			if err != nil {
+				t.Fatalf("failed to get backend: %v", err)
+			}
+			if backend.URL.Port() != "3001" {
+				t.Errorf("case-insensitive host failed, got port %s", backend.URL.Port())
+			}
 		}
 	})
 
@@ -217,8 +253,16 @@ func TestRouterHotReload(t *testing.T) {
 	SetCurrent(r2)
 
 	route, _, ok := Current().Lookup(Host("www.example.com"), "/live")
-	if !ok || route.URLs[0].Port() != "8000" {
-		t.Errorf("hot reload failed, got %v", route.URLs)
+	if !ok {
+		t.Error("hot reload failed, route not found")
+	} else {
+		backend, err := route.NextBackend()
+		if err != nil {
+			t.Fatalf("failed to get backend: %v", err)
+		}
+		if backend.URL.Port() != "8000" {
+			t.Errorf("hot reload failed, got port %s", backend.URL.Port())
+		}
 	}
 
 	if _, _, ok := r1.Lookup(Host("www.example.com"), "/live"); ok {
@@ -231,8 +275,16 @@ func TestRouterEdgeCases(t *testing.T) {
 		r := NewRouter()
 		r = r.Add(Host("example.com"), "/", []*url.URL{mustParseURL("http://localhost:9999")})
 		route, _, ok := r.Lookup(Host("example.com"), "")
-		if !ok || route.URLs[0].Port() != "9999" {
-			t.Errorf("empty path failed")
+		if !ok {
+			t.Error("empty path failed")
+		} else {
+			backend, err := route.NextBackend()
+			if err != nil {
+				t.Fatalf("failed to get backend: %v", err)
+			}
+			if backend.URL.Port() != "9999" {
+				t.Errorf("empty path failed, got port %s", backend.URL.Port())
+			}
 		}
 	})
 	t.Run("No panic on nil router", func(t *testing.T) {

@@ -1,9 +1,10 @@
-package balancer
+package roundrobin
 
 import (
 	"sync/atomic"
 
 	"github.com/diabeney/balto/internal/core"
+	"github.com/diabeney/balto/internal/core/balancer/common"
 )
 
 type RoundRobin struct {
@@ -11,7 +12,7 @@ type RoundRobin struct {
 	list    []*core.Backend
 }
 
-func NewRoundRobin() *RoundRobin {
+func New() *RoundRobin {
 	return &RoundRobin{}
 }
 
@@ -23,7 +24,7 @@ func (r *RoundRobin) Next(backends []*core.Backend) *core.Backend {
 	if backends == nil {
 		backends = r.list
 	}
-	candidates := filterCandidates(backends)
+	candidates := common.FilterCandidates(backends)
 	if len(candidates) == 0 {
 		return nil
 	}

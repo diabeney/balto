@@ -34,7 +34,7 @@ func TestLeastConnectionsNext(t *testing.T) {
 	})
 
 	t.Run("Chooses lowest active", func(t *testing.T) {
-		b2.Meta.IncrActive() // b2 has 1, b1 has 2
+		b2.Meta.IncrActive()
 		lc.Update([]*core.Backend{b1, b2})
 		if got := lc.Next(nil); got != b2 {
 			t.Errorf("expected b2 (lower active), got %v", got)

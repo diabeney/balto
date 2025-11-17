@@ -136,6 +136,21 @@ func (p *Pool) Config() *PoolConfig {
 	return &out
 }
 
+func (p *Pool) Balancer() balancer.Balancer {
+	return p.balancer
+}
+
+func (p *Pool) Next() *core.Backend {
+	if p.balancer == nil {
+		return nil
+	}
+	backends := p.List()
+	if len(backends) == 0 {
+		return nil
+	}
+	return p.balancer.Next(backends)
+}
+
 // RecordSuccess should be called when a request to backend succeeded.
 // It updates metadata and, if failure counters were causing unhealthy state, flip healthy.
 func (p *Pool) RecordSuccess(b *core.Backend) {

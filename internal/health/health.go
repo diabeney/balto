@@ -18,7 +18,7 @@ func StartBackendHealthCheck(ctx context.Context, pool *backendpool.Pool) contex
 	pCfg := pool.Config()
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
-		ticker := time.NewTicker(time.Duration(pCfg.Timeout))
+		ticker := time.NewTicker(time.Duration(pCfg.Timeout) * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
@@ -33,7 +33,7 @@ func StartBackendHealthCheck(ctx context.Context, pool *backendpool.Pool) contex
 					}
 					probeURL := *b.URL
 					probeURL.Path = singleJoin(probeURL.Path, pCfg.ProbePath)
-					client := &http.Client{Timeout: time.Duration(pCfg.Timeout)}
+					client := &http.Client{Timeout: time.Duration(pCfg.Timeout) * time.Millisecond}
 					req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL.String(), nil)
 					if err != nil {
 						continue
@@ -44,7 +44,11 @@ func StartBackendHealthCheck(ctx context.Context, pool *backendpool.Pool) contex
 						continue
 					}
 					resp.Body.Close()
-					pool.RecordSuccess(b)
+					if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+						pool.RecordSuccess(b)
+					} else {
+						pool.RecordFailure(b)
+					}
 				}
 			}
 		}

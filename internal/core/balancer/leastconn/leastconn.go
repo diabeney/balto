@@ -1,12 +1,15 @@
-package balancer
+package leastconn
 
-import "github.com/diabeney/balto/internal/core"
+import (
+	"github.com/diabeney/balto/internal/core"
+	"github.com/diabeney/balto/internal/core/balancer/common"
+)
 
 type LeastConnections struct {
 	list []*core.Backend
 }
 
-func NewLeastConnections() *LeastConnections {
+func New() *LeastConnections {
 	return &LeastConnections{}
 }
 
@@ -18,7 +21,7 @@ func (l *LeastConnections) Next(backends []*core.Backend) *core.Backend {
 	if backends == nil {
 		backends = l.list
 	}
-	candidates := filterCandidates(backends)
+	candidates := common.FilterCandidates(backends)
 	if len(candidates) == 0 {
 		return nil
 	}

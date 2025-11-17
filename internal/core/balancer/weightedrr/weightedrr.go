@@ -1,12 +1,15 @@
-package balancer
+package weightedrr
 
-import "github.com/diabeney/balto/internal/core"
+import (
+	"github.com/diabeney/balto/internal/core"
+	"github.com/diabeney/balto/internal/core/balancer/common"
+)
 
 type WeightedRR struct {
 	list []*core.Backend
 }
 
-func NewWeightedRR() *WeightedRR {
+func New() *WeightedRR {
 	return &WeightedRR{}
 }
 
@@ -18,7 +21,7 @@ func (w *WeightedRR) Next(backends []*core.Backend) *core.Backend {
 	if backends == nil {
 		backends = w.list
 	}
-	candidates := filterCandidates(backends)
+	candidates := common.FilterCandidates(backends)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -26,7 +29,6 @@ func (w *WeightedRR) Next(backends []*core.Backend) *core.Backend {
 	var best *core.Backend
 	var bestScore int64 = -1
 
-	// smooth WRR weight selection
 	for _, b := range candidates {
 		b.Meta.TempWeight += int64(b.Weight)
 		if b.Meta.TempWeight > bestScore {
