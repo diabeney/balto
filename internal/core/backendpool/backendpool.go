@@ -150,8 +150,6 @@ func (p *Pool) Next() *core.Backend {
 	return p.balancer.Next(backends)
 }
 
-// RecordSuccess should be called when a request to backend succeeded.
-// It updates metadata and, if failure counters were causing unhealthy state, flip healthy.
 func (p *Pool) RecordSuccess(b *core.Backend) {
 	if b == nil || b.Meta == nil {
 		return
