@@ -18,22 +18,32 @@ type Proxy struct {
 }
 
 func New(r *router.Router) *Proxy {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+
+		MaxIdleConns:          1000,
+		MaxIdleConnsPerHost:   500, // per backend
+		MaxConnsPerHost:       0,   // let the os decide
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
 	p := &Proxy{
 		router: &atomic.Pointer[router.Router]{},
 		client: &http.Client{
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-			},
-			// Don't follow redirects, let the backend decide
+			Transport: transport,
+			Timeout:   30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
 	}
+
 	p.router.Store(r)
 	return p
 }
@@ -57,12 +67,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	target, err := route.FirstURL()
+	backend, err := route.NextBackend()
 	if err != nil {
-		http.Error(w, "invalid backend url", http.StatusBadGateway)
+		http.Error(w, "no backend available", http.StatusServiceUnavailable)
 		return
 	}
-	outURL := *target
+
+	backend.Meta.IncrActive()
+	defer backend.Meta.DecrActive()
+
+	outURL := *backend.URL
 	/*
 		Strip the matched prefix before forwarding.
 		Example:
@@ -100,17 +114,24 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	outReq.Host = target.Host
+	outReq.Host = backend.URL.Host
 
 	fmt.Printf("[PROXY] Sending %s request to internal service %v\n", outReq.Method, fmt.Sprintf("%s://%s%s", outReq.URL.Scheme, outReq.Host, req.URL.Path))
 	start := time.Now()
 	resp, err := p.client.Do(outReq)
 	if err != nil {
+		route.Pool.RecordFailure(backend)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		fmt.Printf("[PROXY] %s %s -> failed: %v\n", req.Host, req.URL.Path, err)
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		route.Pool.RecordSuccess(backend)
+	} else {
+		route.Pool.RecordFailure(backend)
+	}
 
 	copyHeaders(resp.Header, w.Header())
 	removeHopHeaders(w.Header())

@@ -5,6 +5,10 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+
+	"github.com/diabeney/balto/internal/core"
+	"github.com/diabeney/balto/internal/core/backendpool"
+	"github.com/diabeney/balto/internal/core/balancer"
 )
 
 type InitialRoutes struct {
@@ -28,14 +32,18 @@ func (h Host) normalize() Host {
 
 type Route struct {
 	Prefix string
-	URLs   []*url.URL // This is the pre-parsed backend URLs for the route.
+	Pool   *backendpool.Pool // Backend pool for load balancing
 }
 
-func (r Route) FirstURL() (*url.URL, error) {
-	if len(r.URLs) == 0 {
-		return nil, fmt.Errorf("no backend")
+func (r Route) NextBackend() (*core.Backend, error) {
+	if r.Pool == nil {
+		return nil, fmt.Errorf("no backend pool")
 	}
-	return r.URLs[0], nil
+	backend := r.Pool.Next()
+	if backend == nil {
+		return nil, fmt.Errorf("no healthy backend available")
+	}
+	return backend, nil
 }
 
 type Params map[string]string
@@ -166,7 +174,14 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	}
 	h := host.normalize()
 	segments := pathToSegments(normalizePrefix(path))
-	route := &Route{Prefix: path, URLs: services}
+
+	bal := balancer.NewRoundRobin()
+	pool := backendpool.New(&backendpool.PoolConfig{HealthThreshold: 3}, bal)
+	for i, u := range services {
+		//TODO: Generate a unique ID for each backend service
+		pool.Add(fmt.Sprintf("%d", i), u, 1*uint32(i))
+	}
+	route := &Route{Prefix: path, Pool: pool}
 
 	newMap := make(map[Host]*node, len(r.hosts)+1)
 	for k, v := range r.hosts {

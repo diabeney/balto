@@ -19,7 +19,7 @@ func main() {
 	defer stop()
 
 	cfg := []router.InitialRoutes{
-		{Domain: "localhost", PathPrefix: "*", Ports: []string{"8080"}},
+		{Domain: "localhost", PathPrefix: "*", Ports: []string{"8080", "8081", "8082"}},
 	}
 
 	rt, _ := router.BuildFromConfig(cfg)
