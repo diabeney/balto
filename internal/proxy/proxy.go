@@ -26,8 +26,8 @@ func New(r *router.Router) *Proxy {
 		}).DialContext,
 
 		MaxIdleConns:          1000,
-		MaxIdleConnsPerHost:   500, // per backend
-		MaxConnsPerHost:       0,   // let the os decide
+		MaxIdleConnsPerHost:   500,
+		MaxConnsPerHost:       0, // let the os decide
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
@@ -116,8 +116,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	outReq.Host = backend.URL.Host
 
-	fmt.Printf("[PROXY] Sending %s request to internal service %v\n", outReq.Method, fmt.Sprintf("%s://%s%s", outReq.URL.Scheme, outReq.Host, req.URL.Path))
-	start := time.Now()
+	// fmt.Printf("[PROXY] Sending %s request to internal service %v\n", outReq.Method, fmt.Sprintf("%s://%s%s", outReq.URL.Scheme, outReq.Host, req.URL.Path))
+	// start := time.Now()
 	resp, err := p.client.Do(outReq)
 	if err != nil {
 		route.Pool.RecordFailure(backend)
@@ -157,7 +157,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	close(done)
 
-	fmt.Printf("[PROXY] %s %s took %v\n", req.Method, req.URL.Path, time.Since(start))
+	// fmt.Printf("[PROXY] %s %s took %v\n", req.Method, req.URL.Path, time.Since(start))
 }
 
 func stripPrefix(path, prefix string) string {
