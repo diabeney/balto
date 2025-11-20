@@ -269,7 +269,6 @@ func (p *Pool) MarkHealthy(b *core.Backend) {
 		return
 	}
 
-	// Default to 5 if not configured
 	recoveryThreshold := cfg.ProbeRecoveryThreshold
 	if recoveryThreshold == 0 {
 		recoveryThreshold = 5

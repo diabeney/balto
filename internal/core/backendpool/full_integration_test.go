@@ -79,7 +79,7 @@ func TestFullResilienceFlow(t *testing.T) {
 	// Give probes time to run (s3 should fail)
 	time.Sleep(3 * probeInterval)
 
-	// 3. Verify s3 is excluded by Active Health Check/Circuit Breaker
+	// Verify s3 is excluded by Active Health Check/Circuit Breaker
 	backends := pool.List()
 	var b3, b2 *core.Backend
 	for _, b := range backends {
