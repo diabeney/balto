@@ -109,11 +109,9 @@ func TestHealthchecker(t *testing.T) {
 	})
 
 	t.Run("Stop cleans up", func(t *testing.T) {
-		defer func() {
-			if err := hc.Stop(); err != nil {
-				t.Errorf("Error stopping health checker: %v", err)
-			}
-		}()
+		if err := hc.Stop(); err != nil {
+			t.Errorf("Error stopping health checker: %v", err)
+		}
 		time.Sleep(200 * time.Millisecond)
 		if hc.started {
 			t.Error("should stop after cleanup")
