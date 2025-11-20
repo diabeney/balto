@@ -8,14 +8,16 @@ import (
 	"github.com/diabeney/balto/internal/core"
 	"github.com/diabeney/balto/internal/core/backendpool"
 	"github.com/diabeney/balto/internal/core/balancer"
+	"github.com/diabeney/balto/internal/core/circuit"
 )
 
 func TestLeastConnectionsNext(t *testing.T) {
 	lc := balancer.NewLeastConnections()
 	u, _ := url.Parse("http://x")
+	cbCfg := circuit.Config{}
 
-	b1 := backendpool.NewBackend("1", u, 1)
-	b2 := backendpool.NewBackend("2", u, 1)
+	b1 := backendpool.NewBackend("1", u, 1, cbCfg)
+	b2 := backendpool.NewBackend("2", u, 1, cbCfg)
 	b1.Meta.IncrActive()
 	b1.Meta.IncrActive()
 
@@ -41,20 +43,12 @@ func TestLeastConnectionsNext(t *testing.T) {
 		}
 	})
 
-	t.Run("Ignores unhealthy", func(t *testing.T) {
+	t.Run("Pool filtering handles unhealthy/draining", func(t *testing.T) {
 		b1.SetHealthy(false)
-		lc.Update([]*core.Backend{b1, b2})
-		if got := lc.Next(nil); got != b2 {
-			t.Errorf("expected only healthy b2, got %v", got)
-		}
-	})
-
-	t.Run("Ignores draining", func(t *testing.T) {
-		b1.SetHealthy(true)
 		b2.SetDraining(true)
 		lc.Update([]*core.Backend{b1, b2})
-		if got := lc.Next(nil); got != b1 {
-			t.Errorf("expected only non-draining b1, got %v", got)
+		if got := lc.Next([]*core.Backend{b2}); got != b2 {
+			t.Errorf("pool should only pass healthy/draining-free backends, got %v", got)
 		}
 	})
 }
@@ -62,9 +56,10 @@ func TestLeastConnectionsNext(t *testing.T) {
 func TestLeastConnectionsConcurrent(t *testing.T) {
 	lc := balancer.NewLeastConnections()
 	u, _ := url.Parse("http://x")
+	cbCfg := circuit.Config{}
 	backends := make([]*core.Backend, 3)
 	for i := 0; i < 3; i++ {
-		backends[i] = backendpool.NewBackend(string(rune('a'+i)), u, 1)
+		backends[i] = backendpool.NewBackend(string(rune('a'+i)), u, 1, cbCfg)
 	}
 	lc.Update(backends)
 

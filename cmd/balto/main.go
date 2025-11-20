@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
@@ -19,10 +20,16 @@ func main() {
 	defer stop()
 
 	cfg := []router.InitialRoutes{
-		{Domain: "localhost", PathPrefix: "*", Ports: []string{"8080", "8081", "8083"}},
+		{Domain: "localhost", PathPrefix: "*", Ports: []string{"8080", "8081", "8082", "8083", "8084"}},
 	}
 
-	rt, _ := router.BuildFromConfig(cfg)
+	rt, err := router.BuildFromConfig(cfg)
+
+	if err != nil {
+		log.Fatalf("Failed to build router: %v", err)
+	}
+
+	rt.Start()
 
 	router.SetCurrent(rt)
 
@@ -40,8 +47,14 @@ func main() {
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
 	defer cancel()
+
+	if rt := router.Current(); rt != nil {
+		fmt.Println("Stopping all health checkers...")
+		if err := rt.Stop(); err != nil {
+			fmt.Printf("Error stopping router health chckers: %v", err)
+		}
+	}
 
 	if err := srv.Stop(shutdownCtx); err != nil {
 		log.Printf("Shutdown error: %v", err)

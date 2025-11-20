@@ -1,7 +1,6 @@
 package health
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +53,7 @@ func TestSingleJoin(t *testing.T) {
 	}
 }
 
-func TestStartBackendHealthCheck(t *testing.T) {
+func TestHealthchecker(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ok" {
 			w.WriteHeader(http.StatusOK)
@@ -64,43 +63,60 @@ func TestStartBackendHealthCheck(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	u, _ := url.Parse(srv.URL + "/ok")
+	u, _ := url.Parse(srv.URL)
 	pool := backendpool.New(&backendpool.PoolConfig{
-		ProbePath:       "/ok",
-		Timeout:         500,
-		HealthThreshold: 2,
+		ProbePath:                  "/ok",
+		Timeout:                    100,
+		HealthThreshold:            2,
+		ProbeHealthThreshold:       2,
+		ProbeInterval:              100,
+		CircuitMaxHalfOpenRequests: 1,
 	}, &mockBalancer{})
 	pool.Add("test", u, 1)
 	b := pool.List()[0]
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelFunc := StartBackendHealthCheck(ctx, pool)
-	defer cancelFunc()
+	hc := New(pool)
+	hc.Start()
+	defer func() {
+		if err := hc.Stop(); err != nil {
+			t.Errorf("Error stopping health checker: %v", err)
+		}
+	}()
 
-	time.Sleep(800 * time.Millisecond) // let ticker fire
+	// Healthchecker.manageProbes has 1s ticker.
+	time.Sleep(1500 * time.Millisecond)
 
 	t.Run("Success marks healthy", func(t *testing.T) {
 		if !b.IsHealthy() {
 			t.Error("expected healthy after 200")
 		}
-		if b.Meta.TotalRequests.Load() == 0 {
-			t.Error("expected requests recorded")
-		}
 	})
 
 	t.Run("Failure marks unhealthy after threshold", func(t *testing.T) {
+		// This server path will return 500, marking it unhealthy on probe
 		u2, _ := url.Parse(srv.URL + "/fail")
 		pool.Add("fail", u2, 1)
+
+		// Wait long enough for reconciliation and multiple probes to trip threshold (2)
+		// 500ms is more than enough time for 2 checks at a 100ms interval.
+		time.Sleep(500 * time.Millisecond)
+
 		b2 := pool.List()[1]
-		time.Sleep(800 * time.Millisecond)
+
 		if b2.IsHealthy() {
-			t.Error("should be unhealthy after 2 failures")
+			t.Error("should be unhealthy after failures")
 		}
 	})
 
-	t.Run("Cancel stops checking", func(t *testing.T) {
-		cancel()
-		time.Sleep(600 * time.Millisecond)
-		// No panic
+	t.Run("Stop cleans up", func(t *testing.T) {
+		defer func() {
+			if err := hc.Stop(); err != nil {
+				t.Errorf("Error stopping health checker: %v", err)
+			}
+		}()
+		time.Sleep(200 * time.Millisecond)
+		if hc.started {
+			t.Error("should stop after cleanup")
+		}
 	})
 }

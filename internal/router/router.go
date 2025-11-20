@@ -9,6 +9,7 @@ import (
 	"github.com/diabeney/balto/internal/core"
 	"github.com/diabeney/balto/internal/core/backendpool"
 	"github.com/diabeney/balto/internal/core/balancer"
+	"github.com/diabeney/balto/internal/health"
 )
 
 type InitialRoutes struct {
@@ -32,7 +33,7 @@ func (h Host) normalize() Host {
 
 type Route struct {
 	Prefix string
-	Pool   *backendpool.Pool // Backend pool for load balancing
+	Pool   *backendpool.Pool
 }
 
 func (r Route) NextBackend() (*core.Backend, error) {
@@ -161,41 +162,74 @@ func copyMap(m map[string]*node) map[string]*node {
 }
 
 type Router struct {
-	hosts map[Host]*node
+	hosts          map[Host]*node
+	healthcheckers map[string]*health.Healthchecker
 }
 
 func NewRouter() *Router {
-	return &Router{hosts: make(map[Host]*node)}
+	return &Router{
+		hosts:          make(map[Host]*node),
+		healthcheckers: make(map[string]*health.Healthchecker),
+	}
 }
 
 func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	if host == "" || len(services) == 0 {
 		return r
 	}
+
 	h := host.normalize()
-	segments := pathToSegments(normalizePrefix(path))
+	normPath := normalizePrefix(path)
+	segments := pathToSegments(normPath)
 
 	bal := balancer.NewRoundRobin()
-	pool := backendpool.New(&backendpool.PoolConfig{HealthThreshold: 3}, bal)
-	for i, u := range services {
-		//TODO: Generate a unique ID for each backend service
-		pool.Add(fmt.Sprintf("%d", i), u, 1*uint32(i))
+	poolCfg := &backendpool.PoolConfig{
+		HealthThreshold:            10,
+		ProbeHealthThreshold:       10,
+		ProbeRecoveryThreshold:     5,
+		ProbePath:                  "/api/health",
+		ProbeInterval:              1000,
+		Timeout:                    1000,
+		CircuitFailureThreshold:    10,
+		CircuitSuccessThreshold:    10,
+		CircuitTimeout:             10,
+		CircuitMaxHalfOpenRequests: 5,
+		Retry:                      10,
 	}
-	route := &Route{Prefix: path, Pool: pool}
 
-	newMap := make(map[Host]*node, len(r.hosts)+1)
+	pool := backendpool.New(poolCfg, bal)
+
+	for _, u := range services {
+		id := fmt.Sprintf("%s-%s", h, u.String())
+		pool.Add(id, u, 1)
+	}
+
+	hc := health.New(pool)
+
+	newHosts := make(map[Host]*node, len(r.hosts)+1)
 	for k, v := range r.hosts {
-		newMap[k] = v
+		newHosts[k] = v
+	}
+	newHealthcheckers := make(map[string]*health.Healthchecker, len(r.healthcheckers)+1)
+	for k, v := range r.healthcheckers {
+		newHealthcheckers[k] = v
 	}
 
-	root := r.hosts[h]
+	routeKey := fmt.Sprintf("%s%s", h, normPath)
+	newHealthcheckers[routeKey] = hc
+
+	route := &Route{Prefix: path, Pool: pool}
+	root := newHosts[h]
 	if root == nil {
 		root = &node{children: make(map[string]*node)}
 	}
 	newRoot := root.insert(segments, route)
-	newMap[h] = newRoot
+	newHosts[h] = newRoot
 
-	return &Router{hosts: newMap}
+	return &Router{
+		hosts:          newHosts,
+		healthcheckers: newHealthcheckers,
+	}
 }
 
 func (r *Router) Lookup(host Host, path string) (Route, Params, bool) {
@@ -213,8 +247,43 @@ func (r *Router) Lookup(host Host, path string) (Route, Params, bool) {
 	return *route, params, true
 }
 
+// Start initiates all healthcheckers associated with this router.
+//
+// It is called ONCE when the application starts or ONCE on a newly loaded router
+// during a hot-swap.
+//
+// Individual changes to a pool's backend list (add/remove backends)
+// are handled automatically by the healthchecker's internal reconciliation loop.
+func (r *Router) Start() {
+	for _, hc := range r.healthcheckers {
+		// It is safe to call Start() multiple times on the healthchecker
+		// because Healthchecker struct has a 'started' bool guard.
+		hc.Start()
+	}
+}
+
+// Stop stops all healthcheckers associated with this router.
+// This should be called when the router is being replaced or the application is shutting down.
+// After Stop is called, the router should not be used for routing requests.
+func (r *Router) Stop() error {
+	var errs []error
+	for _, hc := range r.healthcheckers {
+		if hc != nil {
+			if err := hc.Stop(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to stop %d healthchecker(s): %v", len(errs), errs)
+	}
+	return nil
+}
+
 var current atomic.Pointer[Router]
 
+// TODO: When we integrate hot reload fully, we need to make sure we stop the stop the healthchecker for the previour router
+// TODO: before switch to prevent goroutine leaks
 func SetCurrent(r *Router) { current.Store(r) }
 func Current() *Router     { return current.Load() }
 

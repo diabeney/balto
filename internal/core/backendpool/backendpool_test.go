@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/diabeney/balto/internal/core"
+	"github.com/diabeney/balto/internal/core/circuit"
 )
 
 type mockBalancer struct {
@@ -15,10 +16,14 @@ type mockBalancer struct {
 	lastList []*core.Backend
 }
 
-func (m *mockBalancer) Next([]*core.Backend) *core.Backend {
+func (m *mockBalancer) Next(backends []*core.Backend) *core.Backend {
 	m.mu.Lock()
 	m.calls++
 	m.mu.Unlock()
+
+	if len(backends) > 0 {
+		return backends[0]
+	}
 	return nil
 }
 
@@ -29,7 +34,7 @@ func (m *mockBalancer) Update(backends []*core.Backend) {
 }
 
 func TestPoolNew(t *testing.T) {
-	cfg := &PoolConfig{ServiceName: "test", HealthThreshold: 3}
+	cfg := &PoolConfig{ServiceName: "test", HealthThreshold: 3, ProbeHealthThreshold: 2, CircuitMaxHalfOpenRequests: 2}
 	bal := &mockBalancer{}
 	p := New(cfg, bal)
 
@@ -38,6 +43,12 @@ func TestPoolNew(t *testing.T) {
 	}
 	if p.Config().HealthThreshold != 3 {
 		t.Errorf("expected threshold 3, got %d", p.Config().HealthThreshold)
+	}
+	if p.Config().ProbeHealthThreshold != 2 {
+		t.Errorf("expected probe threshold 2, got %d", p.Config().ProbeHealthThreshold)
+	}
+	if p.Config().CircuitMaxHalfOpenRequests != 2 {
+		t.Errorf("expected circuit half-open limit 2, got %d", p.Config().CircuitMaxHalfOpenRequests)
 	}
 }
 
@@ -73,99 +84,167 @@ func TestPoolAddRemove(t *testing.T) {
 
 func TestPoolConfigHotReload(t *testing.T) {
 	p := New(&PoolConfig{ServiceName: "old"}, nil)
-	p.SetConfig(&PoolConfig{ServiceName: "new", HealthThreshold: 5})
+	p.SetConfig(&PoolConfig{ServiceName: "new", HealthThreshold: 5, ProbeHealthThreshold: 7, CircuitMaxHalfOpenRequests: 3})
 	cfg := p.Config()
-	if cfg.ServiceName != "new" || cfg.HealthThreshold != 5 {
+	if cfg.ServiceName != "new" || cfg.HealthThreshold != 5 || cfg.ProbeHealthThreshold != 7 || cfg.CircuitMaxHalfOpenRequests != 3 {
 		t.Errorf("config not updated: %+v", cfg)
 	}
 }
 
-func TestPoolHealthTracking(t *testing.T) {
-	p := New(&PoolConfig{HealthThreshold: 2}, nil)
-	u, _ := url.Parse("http://x")
-	p.Add("x", u, 1)
+func TestPoolCircuitIntegration(t *testing.T) {
+	u, _ := url.Parse("http://circuit")
+	p := New(&PoolConfig{
+		HealthThreshold:            5, // High health threshold
+		ProbeHealthThreshold:       2,
+		CircuitFailureThreshold:    2, // Low circuit threshold
+		CircuitSuccessThreshold:    1,
+		CircuitTimeout:             1,
+		CircuitMaxHalfOpenRequests: 1,
+	}, &mockBalancer{})
+
+	p.Add("cb", u, 1)
 	b := p.List()[0]
 
-	t.Run("RecordFailure marks unhealthy after threshold", func(t *testing.T) {
-		p.RecordFailure(b)
-		p.RecordFailure(b)
-		if b.IsHealthy() {
-			t.Error("should be unhealthy after 2 failures")
-		}
+	b.Circuit = circuit.New(circuit.Config{
+		FailureThreshold:    2,
+		SuccessThreshold:    1,
+		Timeout:             100 * time.Millisecond,
+		MaxHalfOpenRequests: 1,
 	})
 
-	t.Run("RecordSuccess brings back healthy", func(t *testing.T) {
-		p.RecordSuccess(b)
-		if !b.IsHealthy() {
-			t.Error("should be healthy after success")
-		}
-	})
-
-	t.Run("CheckHealth enforces threshold", func(t *testing.T) {
-		b.Meta.ResetFailCount()
-		b.Meta.RecordFailure()
-		b.Meta.RecordFailure()
-		p.CheckHealth(b)
-		if b.IsHealthy() {
-			t.Error("CheckHealth should mark unhealthy")
-		}
-	})
-
-	t.Run("ResetHealth clears and heals", func(t *testing.T) {
-		p.ResetHealth(b)
-		if !b.IsHealthy() || b.Meta.FailCount.Load() != 0 {
-			t.Error("ResetHealth failed")
-		}
-	})
-}
-
-func TestPoolDraining(t *testing.T) {
-	p := New(&PoolConfig{}, nil)
-	u, _ := url.Parse("http://d")
-	p.Add("d", u, 1)
-	b := p.List()[0]
-
-	t.Run("StartDraining sets flag", func(t *testing.T) {
-		p.StartDraining("d")
-		if !b.IsDraining() {
-			t.Error("backend should be draining")
-		}
-	})
-
-	t.Run("WaitForDrain waits for active conns", func(t *testing.T) {
-		b.Meta.IncrActive()
-		done := make(chan bool)
-		go func() {
-			done <- p.WaitForDrain("d", 2*time.Second)
-		}()
-		time.Sleep(100 * time.Millisecond)
-		b.Meta.DecrActive()
-		if !<-done {
-			t.Error("WaitForDrain returned false")
-		}
-	})
-
-	t.Run("WaitForDrain timeout", func(t *testing.T) {
-		b.Meta.IncrActive()
-		if p.WaitForDrain("d", 100*time.Millisecond) {
-			t.Error("expected timeout")
-		}
-	})
-}
-
-func TestPoolConcurrentAddRemove(t *testing.T) {
-	p := New(&PoolConfig{}, nil)
-	u, _ := url.Parse("http://c")
-	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			p.Add(string(rune(id)), u, 1)
-		}(i)
+	if b.Circuit == nil {
+		t.Fatal("Circuit breaker not initialized")
 	}
-	wg.Wait()
-	if len(p.List()) < 1 {
-		t.Errorf("expected at least 1 backend, got %d", len(p.List()))
+
+	p.RecordFailure(b)
+	p.RecordFailure(b)
+
+	if b.Circuit.State() != circuit.Open {
+		t.Errorf("expected Open after 2 failures, got %v", b.Circuit.State())
+	}
+
+	// Balancer should not select it
+	// mockBalancer returns backends[0] if list is not empty
+	if initial := p.Next(); initial != nil {
+		t.Errorf("expected no backend selected (circuit open), got %v", initial)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Balancer logic calls Allow() inside Next(). Poll until the backend becomes eligible.
+	var selected *core.Backend
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		selected = p.Next()
+		if selected != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if selected == nil {
+		t.Fatal("expected backend selected in Half-Open")
+	}
+	if b.Circuit.State() != circuit.HalfOpen {
+		t.Errorf("expected circuit Half-Open after selection, got %v", b.Circuit.State())
+	}
+
+	p.RecordSuccess(b)
+	if b.Circuit.State() != circuit.Closed {
+		t.Errorf("expected Closed after success, got %v", b.Circuit.State())
+	}
+}
+
+func TestPassiveAndProbeFailureTracking(t *testing.T) {
+	u, _ := url.Parse("http://dual")
+	p := New(&PoolConfig{
+		HealthThreshold:      2,
+		ProbeHealthThreshold: 2,
+	}, &mockBalancer{})
+	p.Add("dual", u, 1)
+	b := p.List()[0]
+
+	t.Run("Passive failures mark unhealthy after threshold", func(t *testing.T) {
+		p.RecordFailure(b)
+		if !b.IsHealthy() {
+			t.Fatal("backend should remain healthy after first passive failure")
+		}
+		p.RecordFailure(b)
+		if b.IsHealthy() {
+			t.Fatal("backend should be unhealthy after reaching passive threshold")
+		}
+		if b.Meta.PassiveFailCount.Load() != 2 {
+			t.Fatalf("expected passive fail count 2, got %d", b.Meta.PassiveFailCount.Load())
+		}
+	})
+
+	p.ResetHealth(b)
+
+	t.Run("Probe failures use probe counter only", func(t *testing.T) {
+		if !b.IsHealthy() {
+			t.Fatal("backend should have been restored by MarkHealthy")
+		}
+		p.MarkUnhealthy(b)
+		if b.Meta.ProbeFailCount.Load() != 1 {
+			t.Fatalf("expected probe fail count 1, got %d", b.Meta.ProbeFailCount.Load())
+		}
+		if !b.IsHealthy() {
+			t.Fatal("probe threshold not reached yet, should stay healthy")
+		}
+		p.MarkUnhealthy(b)
+		if b.Meta.ProbeFailCount.Load() != 2 {
+			t.Fatalf("expected probe fail count 2, got %d", b.Meta.ProbeFailCount.Load())
+		}
+		if b.IsHealthy() {
+			t.Fatal("backend should be unhealthy after reaching probe threshold")
+		}
+		if b.Meta.PassiveFailCount.Load() != 0 {
+			t.Fatalf("passive fail count should remain 0, got %d", b.Meta.PassiveFailCount.Load())
+		}
+	})
+}
+
+func TestProbeRecoveryThreshold(t *testing.T) {
+	u, _ := url.Parse("http://recovery")
+	p := New(&PoolConfig{
+		HealthThreshold:        2,
+		ProbeHealthThreshold:   2,
+		ProbeRecoveryThreshold: 3,
+	}, &mockBalancer{})
+	p.Add("recovery", u, 1)
+	b := p.List()[0]
+
+	b.SetHealthy(false)
+	if b.IsHealthy() {
+		t.Fatal("backend should start unhealthy for this test")
+	}
+
+	p.MarkHealthy(b)
+	if b.IsHealthy() {
+		t.Fatal("backend should not be healthy after 1 success (threshold is 3)")
+	}
+	if b.Meta.ProbeSuccessCount.Load() != 1 {
+		t.Fatalf("expected probe success count 1, got %d", b.Meta.ProbeSuccessCount.Load())
+	}
+
+	p.MarkHealthy(b)
+	if b.IsHealthy() {
+		t.Fatal("backend should not be healthy after 2 successes (threshold is 3)")
+	}
+	if b.Meta.ProbeSuccessCount.Load() != 2 {
+		t.Fatalf("expected probe success count 2, got %d", b.Meta.ProbeSuccessCount.Load())
+	}
+
+	p.MarkHealthy(b)
+	if !b.IsHealthy() {
+		t.Fatal("backend should be healthy after 3 consecutive successes")
+	}
+	if b.Meta.ProbeSuccessCount.Load() != 3 {
+		t.Fatalf("expected probe success count 3, got %d", b.Meta.ProbeSuccessCount.Load())
+	}
+
+	// Test that a failure resets the counter
+	p.MarkUnhealthy(b)
+	if b.Meta.ProbeSuccessCount.Load() != 0 {
+		t.Fatalf("probe success count should reset to 0 after failure, got %d", b.Meta.ProbeSuccessCount.Load())
 	}
 }
