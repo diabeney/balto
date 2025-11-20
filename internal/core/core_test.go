@@ -82,24 +82,38 @@ func TestBackendMetadataRecordSuccess(t *testing.T) {
 }
 
 func TestBackendMetadataRecordFailure(t *testing.T) {
-	t.Run("Increments FailCount and TotalRequests", func(t *testing.T) {
+	t.Run("Increments PassiveFailCount and TotalRequests", func(t *testing.T) {
 		m := &BackendMetadata{}
 		m.RecordFailure()
-		if m.FailCount.Load() != 1 {
-			t.Errorf("expected 1 fail, got %d", m.FailCount.Load())
+		if m.PassiveFailCount.Load() != 1 {
+			t.Errorf("expected 1 passive fail, got %d", m.PassiveFailCount.Load())
 		}
 		if m.TotalRequests.Load() != 1 {
 			t.Errorf("expected 1 total, got %d", m.TotalRequests.Load())
 		}
 	})
 
-	t.Run("ResetFailCount", func(t *testing.T) {
+	t.Run("RecordProbeFailure increments ProbeFailCount only", func(t *testing.T) {
+		m := &BackendMetadata{}
+		m.RecordProbeFailure()
+		if m.ProbeFailCount.Load() != 1 {
+			t.Errorf("expected 1 probe fail, got %d", m.ProbeFailCount.Load())
+		}
+		if m.TotalRequests.Load() != 0 {
+			t.Errorf("expected probe failures not to affect total, got %d", m.TotalRequests.Load())
+		}
+	})
+
+	t.Run("ResetAllFailCounts", func(t *testing.T) {
 		m := &BackendMetadata{}
 		m.RecordFailure()
-		m.RecordFailure()
-		m.ResetFailCount()
-		if m.FailCount.Load() != 0 {
-			t.Errorf("expected 0 fails after reset, got %d", m.FailCount.Load())
+		m.RecordProbeFailure()
+		m.ResetAllFailCounts()
+		if m.PassiveFailCount.Load() != 0 {
+			t.Errorf("expected 0 passive fails after reset, got %d", m.PassiveFailCount.Load())
+		}
+		if m.ProbeFailCount.Load() != 0 {
+			t.Errorf("expected 0 probe fails after reset, got %d", m.ProbeFailCount.Load())
 		}
 	})
 }

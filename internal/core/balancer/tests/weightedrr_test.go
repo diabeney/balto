@@ -7,13 +7,16 @@ import (
 	"github.com/diabeney/balto/internal/core"
 	"github.com/diabeney/balto/internal/core/backendpool"
 	"github.com/diabeney/balto/internal/core/balancer"
+	"github.com/diabeney/balto/internal/core/circuit"
 )
 
 func TestWeightedRRNext(t *testing.T) {
 	wrr := balancer.NewWeightedRR()
 	u, _ := url.Parse("http://x")
-	b1 := backendpool.NewBackend("1", u, 1)
-	b2 := backendpool.NewBackend("2", u, 3)
+	cbCfg := circuit.Config{}
+
+	b1 := backendpool.NewBackend("1", u, 1, cbCfg)
+	b2 := backendpool.NewBackend("2", u, 3, cbCfg)
 
 	t.Run("Empty list returns nil", func(t *testing.T) {
 		wrr.Update(nil)
@@ -58,12 +61,12 @@ func TestWeightedRRNext(t *testing.T) {
 		}
 	})
 
-	t.Run("Ignores unhealthy/draining", func(t *testing.T) {
+	t.Run("Pool filtering handles unhealthy/draining", func(t *testing.T) {
 		b1.SetHealthy(false)
 		b2.SetDraining(true)
-		wrr.Update([]*core.Backend{b1, b2})
-		if got := wrr.Next(nil); got != nil {
-			t.Errorf("expected nil, got %v", got)
+		wrr.Update([]*core.Backend{b2})
+		if got := wrr.Next(nil); got != b2 {
+			t.Errorf("expected pool to pre-filter unhealthy/draining backends, got %v", got)
 		}
 	})
 }
