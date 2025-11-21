@@ -24,7 +24,6 @@ func (h Host) lower() Host { return Host(strings.ToLower(string(h))) }
 
 func (h Host) normalize() Host {
 	host := string(h.lower())
-	// Remove port if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
