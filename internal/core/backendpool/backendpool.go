@@ -10,7 +10,15 @@ import (
 	"github.com/diabeney/balto/internal/core"
 	"github.com/diabeney/balto/internal/core/balancer"
 	"github.com/diabeney/balto/internal/core/circuit"
+	"github.com/diabeney/balto/internal/metrics"
 )
+
+// updateBackendHealthMetric updates the backend health metric if metrics collector is available
+func updateBackendHealthMetric(backendID, route string, healthy bool) {
+	if m := metrics.GetGlobal(); m != nil {
+		m.SetBackendHealthy(backendID, route, healthy)
+	}
+}
 
 func NewBackend(id string, u *url.URL, weight uint32, cbCfg circuit.Config) *core.Backend {
 	b := &core.Backend{
@@ -112,6 +120,12 @@ func (p *Pool) Add(id string, u *url.URL, weight uint32) {
 	p.backends.Store(&BackendList{Items: newItems})
 	if p.balancer != nil {
 		p.balancer.Update(newItems)
+	}
+
+	// Initialize backend health metric
+	if m := metrics.GetGlobal(); m != nil {
+		m.SetBackendHealthy(newB.ID, "", newB.IsHealthy())
+		m.SetBackendActiveConnections(newB.ID, 0)
 	}
 }
 
@@ -216,6 +230,7 @@ func (p *Pool) RecordFailure(b *core.Backend) {
 	if b.Meta.PassiveFailCount.Load() >= threshold {
 		if b.SetHealthy(false) {
 			log.Printf("BackendDown: (%s) is now unhealthy (threshold reached)", b.URL)
+			updateBackendHealthMetric(b.ID, "", false)
 		}
 	}
 }
@@ -235,6 +250,7 @@ func (p *Pool) CheckHealth(b *core.Backend) {
 	if passive >= passiveThreshold || probe >= probeThreshold {
 		if b.SetHealthy(false) {
 			log.Printf("BackendDown: (%s) is now unhealthy (check health)", b.URL)
+			updateBackendHealthMetric(b.ID, "", false)
 		}
 	}
 }
@@ -278,6 +294,7 @@ func (p *Pool) MarkHealthy(b *core.Backend) {
 		if !b.IsHealthy() {
 			if b.SetHealthy(true) {
 				log.Printf("BackendRecovered: (%s) marked healthy by Probe", b.URL)
+				updateBackendHealthMetric(b.ID, "", true)
 			}
 		}
 	}
@@ -288,6 +305,9 @@ func (p *Pool) MarkUnhealthy(b *core.Backend) {
 		return
 	}
 	b.Meta.RecordProbeFailure()
+	if m := metrics.GetGlobal(); m != nil {
+		m.RecordProbeFailure(b.ID)
+	}
 
 	b.Meta.ResetProbeSuccessCount()
 
@@ -302,6 +322,7 @@ func (p *Pool) MarkUnhealthy(b *core.Backend) {
 	if b.Meta.ProbeFailCount.Load() >= probeThreshold(cfg) {
 		if b.SetHealthy(false) {
 			log.Printf("BackendDown: (%s) marked unhealthy by probe", b.URL)
+			updateBackendHealthMetric(b.ID, "", false)
 		}
 	}
 }

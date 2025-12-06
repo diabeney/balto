@@ -5,13 +5,18 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/diabeney/balto/internal/api/core"
+	"github.com/diabeney/balto/internal/config"
+	"github.com/diabeney/balto/internal/metrics"
 	"github.com/diabeney/balto/internal/proxy"
 	"github.com/diabeney/balto/internal/router"
 	"github.com/diabeney/balto/internal/server"
+	"github.com/diabeney/balto/pkg/utils"
 )
 
 func main() {
@@ -19,12 +24,26 @@ func main() {
 
 	defer stop()
 
-	cfg := []router.InitialRoutes{
-		{Domain: "localhost", PathPrefix: "*", Ports: []string{"8080", "8081", "8082", "8083", "8084"}},
+	configPath := os.Getenv("BALTO_CONFIG")
+	if configPath == "" {
+		configPath = "configs/balto.config.yaml"
 	}
 
-	rt, err := router.BuildFromConfig(cfg)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
+	routes := make([]router.InitialRoutes, len(cfg.Services))
+	for i, svc := range cfg.Services {
+		routes[i] = router.InitialRoutes{
+			Domain:     svc.Domain,
+			PathPrefix: svc.PathPrefix,
+			Ports:      svc.Ports,
+		}
+	}
+
+	rt, err := router.BuildFromConfig(routes)
 	if err != nil {
 		log.Fatalf("Failed to build router: %v", err)
 	}
@@ -33,10 +52,30 @@ func main() {
 
 	router.SetCurrent(rt)
 
-	px := proxy.New(router.Current())
+	// Initialize metrics collector if enabled
+	var metricsCollector *metrics.Collector
+	if cfg.Global.Metrics.Enabled {
+		metricsCollector = metrics.NewCollector()
+		metricsCollector.Register()
+	}
 
-	//TODO: Load port from config
-	srv := server.New(":80", http.HandlerFunc(px.ServeHTTP))
+	px := proxy.NewWithMetrics(router.Current(), metricsCollector)
+
+	srv := server.NewWithMetrics(cfg.Server.Address(), http.HandlerFunc(px.ServeHTTP), cfg, nil, metricsCollector)
+
+	sm := core.GetServiceManager()
+	if sm != nil {
+		services := make([]core.ServiceInfo, len(cfg.Services))
+		for i, svc := range cfg.Services {
+			services[i] = core.ServiceInfo{
+				ID:         utils.HashServiceID(svc.Domain, svc.PathPrefix),
+				Domain:     svc.Domain,
+				PathPrefix: svc.PathPrefix,
+				Ports:      svc.Ports,
+			}
+		}
+		_ = sm.InitializeFromConfig(services)
+	}
 
 	go func() {
 		if err := srv.Start(); err != nil {

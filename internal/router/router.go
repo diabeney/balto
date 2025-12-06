@@ -181,7 +181,7 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	normPath := normalizePrefix(path)
 	segments := pathToSegments(normPath)
 
-	bal := balancer.NewRoundRobin()
+	bal := balancer.NewLeastConnections()
 	poolCfg := &backendpool.PoolConfig{
 		HealthThreshold:            10,
 		ProbeHealthThreshold:       10,
@@ -285,6 +285,40 @@ var current atomic.Pointer[Router]
 // TODO: before switch to prevent goroutine leaks
 func SetCurrent(r *Router) { current.Store(r) }
 func Current() *Router     { return current.Load() }
+
+// ServiceInfo represents the information needed to rebuild a router from services.
+type ServiceInfo struct {
+	ID         string
+	Domain     string
+	PathPrefix string
+	Ports      []string
+}
+
+// RebuildFromServices creates a new router from a list of services and replaces the current router.
+// It stops the old router before setting the new one.
+func RebuildFromServices(services []ServiceInfo) error {
+	newRouter := NewRouter()
+
+	for _, svc := range services {
+		parsedServices, err := parseServices(svc.Ports, "http")
+		if err != nil {
+			return fmt.Errorf("failed to parse services for %s: %w", svc.ID, err)
+		}
+		newRouter = newRouter.Add(Host(svc.Domain), svc.PathPrefix, parsedServices)
+	}
+
+	newRouter.Start()
+	oldRouter := Current()
+	SetCurrent(newRouter)
+
+	if oldRouter != nil {
+		if err := oldRouter.Stop(); err != nil {
+			return fmt.Errorf("failed to stop old router's healthcheckers: %w", err)
+		}
+	}
+
+	return nil
+}
 
 func normalizePrefix(p string) string {
 	p = strings.TrimSpace(p)

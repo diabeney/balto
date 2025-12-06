@@ -9,7 +9,7 @@ global:
     level: info
     path: /var/log/balto/balto.log
   metrics:
-    path: /var/log/balto/metrics.json
+    enabled: true
   cors:
     enabled: false
     allowed_origins: []
@@ -17,3 +17,11 @@ global:
     read: 5s
     write: 5s
     idle: 30s
+
+server:
+  port: ":5500"
+
+services:
+  - domain: localhost
+    path_prefix: "*"
+    ports: ["8080", "8081", "8082", "8083", "8084"]
