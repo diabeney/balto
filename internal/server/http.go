@@ -6,28 +6,69 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/diabeney/balto/internal/api"
+	"github.com/diabeney/balto/internal/config"
 	"github.com/diabeney/balto/internal/health"
+	"github.com/diabeney/balto/internal/metrics"
+	"github.com/diabeney/balto/pkg/broadcast"
 )
 
 type HTTPServer struct {
-	server *http.Server
+	server  *http.Server
+	metrics *metrics.Collector
 }
 
-func New(addr string, proxyHandler http.Handler) *HTTPServer {
+func New(addr string, proxyHandler http.Handler, cfg *config.Config, broadcaster *broadcast.Broadcaster) *HTTPServer {
+	return NewWithMetrics(addr, proxyHandler, cfg, broadcaster, nil)
+}
+
+func NewWithMetrics(addr string, proxyHandler http.Handler, cfg *config.Config, broadcaster *broadcast.Broadcaster, m *metrics.Collector) *HTTPServer {
 	mux := http.NewServeMux()
 
 	mux.Handle("/health", http.HandlerFunc(health.CheckBaltoHealth))
+	api.SetupRoutes(mux, broadcaster)
+
+	// Start background goroutine to update system metrics periodically if metrics collector is provided
+	if m != nil {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				m.RecordSystemMetrics()
+			}
+		}()
+	}
+
 	mux.Handle("/", proxyHandler)
+
+	readTimeout, err := cfg.Global.Timeouts.ReadDuration()
+	if err != nil {
+		log.Printf("Invalid read timeout config, using default: %v", err)
+		readTimeout = 5 * time.Second
+	}
+
+	writeTimeout, err := cfg.Global.Timeouts.WriteDuration()
+	if err != nil {
+		log.Printf("Invalid write timeout config, using default: %v", err)
+		writeTimeout = 5 * time.Second
+	}
+
+	idleTimeout, err := cfg.Global.Timeouts.IdleDuration()
+	if err != nil {
+		log.Printf("Invalid idle timeout config, using default: %v", err)
+		idleTimeout = 30 * time.Second
+	}
 
 	return &HTTPServer{
 		server: &http.Server{
 			Addr:              addr,
 			Handler:           mux,
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       10 * time.Second,
-			WriteTimeout:      10 * time.Second,
-			IdleTimeout:       60 * time.Second,
+			ReadHeaderTimeout: readTimeout,
+			ReadTimeout:       readTimeout,
+			WriteTimeout:      writeTimeout,
+			IdleTimeout:       idleTimeout,
 		},
+		metrics: m,
 	}
 }
 
