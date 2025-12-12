@@ -50,7 +50,6 @@ func main() {
 
 	router.SetCurrent(rt)
 
-	// Initialize metrics collector if enabled
 	var metricsCollector *metrics.Collector
 	if cfg.Global.Metrics.Enabled {
 		metricsCollector = metrics.NewCollector()
@@ -84,6 +83,7 @@ func main() {
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
 	defer cancel()
 
 	if rt := router.Current(); rt != nil {

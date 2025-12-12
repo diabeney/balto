@@ -311,7 +311,7 @@ func RebuildFromServices(services []ServiceInfo) error {
 	newRouter := NewRouter()
 
 	for _, svc := range services {
-		parsedServices, err := parseServices(svc.Ports, "http")
+		parsedServices, err := normalizeServiceUrls(svc.Ports, "http")
 		if err != nil {
 			return fmt.Errorf("failed to parse services for %s: %w", svc.ID, err)
 		}
@@ -357,7 +357,7 @@ func pathToSegments(path string) []string {
 	return segs
 }
 
-func parseServices(ports []string, scheme string) ([]*url.URL, error) {
+func normalizeServiceUrls(ports []string, scheme string) ([]*url.URL, error) {
 	out := make([]*url.URL, 0, len(ports))
 	defaultHost := strings.TrimSpace(os.Getenv("BALTO_UPSTREAM_HOST"))
 	if defaultHost == "" {
@@ -371,6 +371,7 @@ func parseServices(ports []string, scheme string) ([]*url.URL, error) {
 		}
 
 		var raw string
+		//TODO: Revisit when working on networking fully
 		if strings.Contains(addr, "://") {
 			// Full URL provided ( http://api:8080 or https://example.com)
 			raw = addr
@@ -394,7 +395,7 @@ func parseServices(ports []string, scheme string) ([]*url.URL, error) {
 func BuildFromConfig(cfg []InitialRoutes) (*Router, error) {
 	r := NewRouter()
 	for _, c := range cfg {
-		services, err := parseServices(c.Ports, "http")
+		services, err := normalizeServiceUrls(c.Ports, "http")
 		if err != nil {
 			return nil, err
 		}

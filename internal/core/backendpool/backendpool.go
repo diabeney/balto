@@ -13,7 +13,6 @@ import (
 	"github.com/diabeney/balto/internal/metrics"
 )
 
-// updateBackendHealthMetric updates the backend health metric if metrics collector is available
 func updateBackendHealthMetric(backendID, route string, healthy bool) {
 	if m := metrics.GetGlobal(); m != nil {
 		m.SetBackendHealthy(backendID, route, healthy)
@@ -209,6 +208,11 @@ func (p *Pool) RecordSuccess(b *core.Backend) {
 	// We dont bring back the backend if it was unhealthy due to failCount,
 	// it will be brought back by the health checker. We want to make
 	// the health checker the only source of truth for backend health.
+
+	/*!WARN: Maybe this decision has to be revised or make sure the healthchecker is reliable. If the healthchecker fails/break down,
+	it means unhealthy backend services stay in that stat forever.
+	*/
+
 }
 
 func (p *Pool) RecordFailure(b *core.Backend) {
@@ -368,7 +372,6 @@ func (p *Pool) WaitForDrain(id string, timeout time.Duration) bool {
 		if !found {
 			return false
 		}
-		//TODO: Make this configurable
 		time.Sleep(50 * time.Millisecond)
 	}
 	return false

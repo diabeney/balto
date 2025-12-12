@@ -11,6 +11,7 @@ import (
 const (
 	__BALTO_DEFAULT_LOGS_PATH string = "/var/log/balto/balto.log"
 	__BALTO_DEFAULT_PORT      string = ":5500"
+	__BALTO_DEFAULT_ALGO      string = "round-robbin"
 )
 
 type Config struct {
@@ -72,7 +73,7 @@ func Default() *Config {
 	return &Config{
 		Global: GlobalConfig{
 			LoadBalancing: LoadBalancingConfig{
-				Algorithm: "round-robin",
+				Algorithm: __BALTO_DEFAULT_ALGO,
 			},
 			TLS: TLSConfig{
 				Enabled:  false,
