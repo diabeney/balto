@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 
@@ -163,12 +164,22 @@ func copyMap(m map[string]*node) map[string]*node {
 type Router struct {
 	hosts          map[Host]*node
 	healthcheckers map[string]*health.Healthchecker
+	algorithm      string
 }
 
 func NewRouter() *Router {
 	return &Router{
 		hosts:          make(map[Host]*node),
 		healthcheckers: make(map[string]*health.Healthchecker),
+		algorithm:      "round-robin",
+	}
+}
+
+func NewRouterWithAlgorithm(algorithm string) *Router {
+	return &Router{
+		hosts:          make(map[Host]*node),
+		healthcheckers: make(map[string]*health.Healthchecker),
+		algorithm:      algorithm,
 	}
 }
 
@@ -181,7 +192,7 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	normPath := normalizePrefix(path)
 	segments := pathToSegments(normPath)
 
-	bal := balancer.NewLeastConnections()
+	bal := balancer.NewRoundRobin()
 	poolCfg := &backendpool.PoolConfig{
 		HealthThreshold:            10,
 		ProbeHealthThreshold:       10,
@@ -300,7 +311,7 @@ func RebuildFromServices(services []ServiceInfo) error {
 	newRouter := NewRouter()
 
 	for _, svc := range services {
-		parsedServices, err := parseServices(svc.Ports, "http")
+		parsedServices, err := normalizeServiceUrls(svc.Ports, "http")
 		if err != nil {
 			return fmt.Errorf("failed to parse services for %s: %w", svc.ID, err)
 		}
@@ -346,10 +357,33 @@ func pathToSegments(path string) []string {
 	return segs
 }
 
-func parseServices(ports []string, scheme string) ([]*url.URL, error) {
+func normalizeServiceUrls(ports []string, scheme string) ([]*url.URL, error) {
 	out := make([]*url.URL, 0, len(ports))
+	defaultHost := strings.TrimSpace(os.Getenv("BALTO_UPSTREAM_HOST"))
+	if defaultHost == "" {
+		defaultHost = "localhost"
+	}
+
 	for _, p := range ports {
-		u, err := url.Parse(scheme + "://localhost:" + p)
+		addr := strings.TrimSpace(p)
+		if addr == "" {
+			continue
+		}
+
+		var raw string
+		//TODO: Revisit when working on networking fully
+		if strings.Contains(addr, "://") {
+			// Full URL provided ( http://api:8080 or https://example.com)
+			raw = addr
+		} else if strings.Contains(addr, ":") {
+			// host:port provided ( api:8080 )
+			raw = scheme + "://" + addr
+		} else {
+			// Port-only provided default to ${BALTO_UPSTREAM_HOST}:<port>
+			raw = scheme + "://" + defaultHost + ":" + addr
+		}
+
+		u, err := url.Parse(raw)
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +395,7 @@ func parseServices(ports []string, scheme string) ([]*url.URL, error) {
 func BuildFromConfig(cfg []InitialRoutes) (*Router, error) {
 	r := NewRouter()
 	for _, c := range cfg {
-		services, err := parseServices(c.Ports, "http")
+		services, err := normalizeServiceUrls(c.Ports, "http")
 		if err != nil {
 			return nil, err
 		}

@@ -29,7 +29,7 @@ func TestHealthEndpointOK(t *testing.T) {
 
 	proxySrv := proxy.New(router.Current())
 	cfg := config.Default()
-	s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP), cfg, nil)
+	s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP), cfg)
 
 	testSrv := httptest.NewServer(s.server.Handler)
 	defer testSrv.Close()

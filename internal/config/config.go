@@ -8,6 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	__BALTO_DEFAULT_LOGS_PATH string = "/var/log/balto/balto.log"
+	__BALTO_DEFAULT_PORT      string = ":5500"
+	__BALTO_DEFAULT_ALGO      string = "round-robbin"
+)
+
 type Config struct {
 	Global   GlobalConfig    `yaml:"global"`
 	Server   ServerConfig    `yaml:"server"`
@@ -67,7 +73,7 @@ func Default() *Config {
 	return &Config{
 		Global: GlobalConfig{
 			LoadBalancing: LoadBalancingConfig{
-				Algorithm: "round-robin",
+				Algorithm: __BALTO_DEFAULT_ALGO,
 			},
 			TLS: TLSConfig{
 				Enabled:  false,
@@ -76,7 +82,7 @@ func Default() *Config {
 			},
 			Logging: LoggingConfig{
 				Level: "info",
-				Path:  "/var/log/balto/balto.log",
+				Path:  __BALTO_DEFAULT_LOGS_PATH,
 			},
 			Metrics: MetricsConfig{
 				Enabled: true,
@@ -92,7 +98,7 @@ func Default() *Config {
 			},
 		},
 		Server: ServerConfig{
-			Port: ":8080",
+			Port: __BALTO_DEFAULT_PORT,
 		},
 		Services: []ServiceConfig{},
 	}
@@ -137,9 +143,6 @@ func (t *TimeoutsConfig) IdleDuration() (time.Duration, error) {
 }
 
 func (s *ServerConfig) Address() string {
-	if s.Port == "" {
-		return ":8080"
-	}
 	if s.Port[0] != ':' {
 		return ":" + s.Port
 	}

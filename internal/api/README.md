@@ -1,3 +1,3 @@
-# CLI Package
+# API Package
 
-This package manages CLI commands like `run`, `reload`, `status`, `check`, and `version`.
+This package exposes Balto’s management and observability endpoints under the `/balto/*` prefix.
