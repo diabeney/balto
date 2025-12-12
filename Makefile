@@ -1,4 +1,4 @@
-.PHONY: build test run lint lint-fix format install-hooks
+.PHONY: build test run lint lint-fix format install-hooks show-balto-logs
 
 build:
 	go build -o bin/balto ./cmd/balto
@@ -7,7 +7,7 @@ test:
 	go test ./... -v
 
 run:
-	go run ./cmd/balto
+	docker compose up --build
 
 lint:
 	golangci-lint run
@@ -20,4 +20,7 @@ format:
 
 install-hooks:
 	@bash scripts/install-hooks.sh
+
+show-balto-logs:
+	docker compose logs -f --tail=200 balto
 

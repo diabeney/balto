@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/diabeney/balto/internal/config"
 	"github.com/diabeney/balto/internal/proxy"
 	"github.com/diabeney/balto/internal/router"
 )
@@ -27,7 +28,8 @@ func TestHealthEndpointOK(t *testing.T) {
 	router.SetCurrent(rt)
 
 	proxySrv := proxy.New(router.Current())
-	s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP))
+	cfg := config.Default()
+	s := New(":0", http.HandlerFunc(proxySrv.ServeHTTP), cfg)
 
 	testSrv := httptest.NewServer(s.server.Handler)
 	defer testSrv.Close()

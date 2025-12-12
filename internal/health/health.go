@@ -36,7 +36,6 @@ type Healthchecker struct {
 func New(pool *backendpool.Pool) *Healthchecker {
 	cfg := pool.Config()
 
-	//TODO: Maybe a proper way to set defaults?
 	timeout := time.Duration(cfg.Timeout) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 500 * time.Millisecond
@@ -162,12 +161,12 @@ func (h *Healthchecker) reconcile() {
 
 	for id, b := range currentIDs {
 		if _, exists := h.probes[id]; !exists {
-			h.startProbeForBackendLocked(b)
+			h.startProbeForBackend(b)
 		}
 	}
 }
 
-func (h *Healthchecker) startProbeForBackendLocked(b *core.Backend) {
+func (h *Healthchecker) startProbeForBackend(b *core.Backend) {
 	if !h.started || h.ctx == nil {
 		return
 	}

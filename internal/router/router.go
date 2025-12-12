@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 
@@ -24,7 +25,6 @@ func (h Host) lower() Host { return Host(strings.ToLower(string(h))) }
 
 func (h Host) normalize() Host {
 	host := string(h.lower())
-	// Remove port if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
@@ -164,12 +164,22 @@ func copyMap(m map[string]*node) map[string]*node {
 type Router struct {
 	hosts          map[Host]*node
 	healthcheckers map[string]*health.Healthchecker
+	algorithm      string
 }
 
 func NewRouter() *Router {
 	return &Router{
 		hosts:          make(map[Host]*node),
 		healthcheckers: make(map[string]*health.Healthchecker),
+		algorithm:      "round-robin",
+	}
+}
+
+func NewRouterWithAlgorithm(algorithm string) *Router {
+	return &Router{
+		hosts:          make(map[Host]*node),
+		healthcheckers: make(map[string]*health.Healthchecker),
+		algorithm:      algorithm,
 	}
 }
 
@@ -287,6 +297,40 @@ var current atomic.Pointer[Router]
 func SetCurrent(r *Router) { current.Store(r) }
 func Current() *Router     { return current.Load() }
 
+// ServiceInfo represents the information needed to rebuild a router from services.
+type ServiceInfo struct {
+	ID         string
+	Domain     string
+	PathPrefix string
+	Ports      []string
+}
+
+// RebuildFromServices creates a new router from a list of services and replaces the current router.
+// It stops the old router before setting the new one.
+func RebuildFromServices(services []ServiceInfo) error {
+	newRouter := NewRouter()
+
+	for _, svc := range services {
+		parsedServices, err := normalizeServiceUrls(svc.Ports, "http")
+		if err != nil {
+			return fmt.Errorf("failed to parse services for %s: %w", svc.ID, err)
+		}
+		newRouter = newRouter.Add(Host(svc.Domain), svc.PathPrefix, parsedServices)
+	}
+
+	newRouter.Start()
+	oldRouter := Current()
+	SetCurrent(newRouter)
+
+	if oldRouter != nil {
+		if err := oldRouter.Stop(); err != nil {
+			return fmt.Errorf("failed to stop old router's healthcheckers: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func normalizePrefix(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" || p == "/" {
@@ -313,10 +357,33 @@ func pathToSegments(path string) []string {
 	return segs
 }
 
-func parseServices(ports []string, scheme string) ([]*url.URL, error) {
+func normalizeServiceUrls(ports []string, scheme string) ([]*url.URL, error) {
 	out := make([]*url.URL, 0, len(ports))
+	defaultHost := strings.TrimSpace(os.Getenv("BALTO_UPSTREAM_HOST"))
+	if defaultHost == "" {
+		defaultHost = "localhost"
+	}
+
 	for _, p := range ports {
-		u, err := url.Parse(scheme + "://localhost:" + p)
+		addr := strings.TrimSpace(p)
+		if addr == "" {
+			continue
+		}
+
+		var raw string
+		//TODO: Revisit when working on networking fully
+		if strings.Contains(addr, "://") {
+			// Full URL provided ( http://api:8080 or https://example.com)
+			raw = addr
+		} else if strings.Contains(addr, ":") {
+			// host:port provided ( api:8080 )
+			raw = scheme + "://" + addr
+		} else {
+			// Port-only provided default to ${BALTO_UPSTREAM_HOST}:<port>
+			raw = scheme + "://" + defaultHost + ":" + addr
+		}
+
+		u, err := url.Parse(raw)
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +395,7 @@ func parseServices(ports []string, scheme string) ([]*url.URL, error) {
 func BuildFromConfig(cfg []InitialRoutes) (*Router, error) {
 	r := NewRouter()
 	for _, c := range cfg {
-		services, err := parseServices(c.Ports, "http")
+		services, err := normalizeServiceUrls(c.Ports, "http")
 		if err != nil {
 			return nil, err
 		}

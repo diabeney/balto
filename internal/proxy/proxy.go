@@ -9,34 +9,30 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diabeney/balto/internal/metrics"
 	"github.com/diabeney/balto/internal/router"
 )
 
 type Proxy struct {
-	router *atomic.Pointer[router.Router]
-	client *http.Client
+	router    *atomic.Pointer[router.Router]
+	client    *http.Client
+	transport *TimedTransport
+	metrics   *metrics.Collector
 }
 
 func New(r *router.Router) *Proxy {
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+	return NewWithMetrics(r, nil)
+}
 
-		MaxIdleConns:          1000,
-		MaxIdleConnsPerHost:   500,
-		MaxConnsPerHost:       0, // let the os decide
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+func NewWithMetrics(r *router.Router, m *metrics.Collector) *Proxy {
+	transport := NewTimedTransport()
 
 	p := &Proxy{
-		router: &atomic.Pointer[router.Router]{},
+		router:    &atomic.Pointer[router.Router]{},
+		transport: transport,
+		metrics:   m,
 		client: &http.Client{
-			Transport: transport,
+			Transport: transport.Base,
 			Timeout:   30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -53,48 +49,52 @@ func (p *Proxy) UpdateRouter(r *router.Router) {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	timing := NewTimingInfo()
 	ctx := req.Context()
 	rt := p.router.Load()
 
 	if rt == nil {
+		p.recordErrorMetrics(req, "", "", timing, http.StatusServiceUnavailable)
 		http.Error(w, "router not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	route, params, ok := rt.Lookup(router.Host(req.Host), req.URL.Path)
 	if !ok {
+		p.recordErrorMetrics(req, "", "", timing, http.StatusNotFound)
 		http.Error(w, "route not found", http.StatusNotFound)
 		return
 	}
 
 	backend, err := route.NextBackend()
 	if err != nil {
+		p.recordErrorMetrics(req, route.Prefix, "", timing, http.StatusServiceUnavailable)
 		http.Error(w, "no backend available", http.StatusServiceUnavailable)
 		return
 	}
 
 	backend.Meta.IncrActive()
-	defer backend.Meta.DecrActive()
+	if p.metrics != nil {
+		p.metrics.SetBackendActiveConnections(backend.ID, backend.Meta.Active())
+	}
+	defer func() {
+		backend.Meta.DecrActive()
+		if p.metrics != nil {
+			p.metrics.SetBackendActiveConnections(backend.ID, backend.Meta.Active())
+		}
+	}()
 
 	outURL := *backend.URL
-	/*
-		Strip the matched prefix before forwarding.
-		Example:
-		External request:  /api/v1/users/123
-		Route prefix:      /api/v1
-		Backend receives:  /users/123
-		This allows the services to define routes without the public prefix.
-		For wildcard routes, we strip everything up to the wildcard.
-	*/
 	outURL.Path = stripPrefix(req.URL.Path, route.Prefix)
 	if outURL.Path == "" {
 		outURL.Path = "/"
 	}
-
 	outURL.RawQuery = req.URL.RawQuery
 
-	outReq, err := http.NewRequestWithContext(ctx, req.Method, outURL.String(), req.Body)
+	tracedCtx := WithClientTrace(ctx, timing)
+	outReq, err := http.NewRequestWithContext(tracedCtx, req.Method, outURL.String(), req.Body)
 	if err != nil {
+		p.recordErrorMetrics(req, route.Prefix, backend.ID, timing, http.StatusInternalServerError)
 		http.Error(w, "failed to create outbound request", http.StatusInternalServerError)
 		return
 	}
@@ -115,22 +115,37 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	outReq.Host = backend.URL.Host
+	outReq.ContentLength = req.ContentLength
 
-	// fmt.Printf("[PROXY] Sending %s request to internal service %v\n", outReq.Method, fmt.Sprintf("%s://%s%s", outReq.URL.Scheme, outReq.Host, req.URL.Path))
-	// start := time.Now()
+	var bytesSent int64
+	if req.ContentLength > 0 {
+		bytesSent = req.ContentLength
+	}
+
 	resp, err := p.client.Do(outReq)
+	timing.MarkRequestDone()
+	timing.Calculate()
+
 	if err != nil {
 		route.Pool.RecordFailure(backend)
+		if p.metrics != nil {
+			p.metrics.RecordBackendFailure(backend.ID, "connection_error")
+			p.recordDetailedMetrics(req, route.Prefix, backend.ID, timing, http.StatusBadGateway, bytesSent, 0)
+		}
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		fmt.Printf("[PROXY] %s %s -> failed: %v\n", req.Host, req.URL.Path, err)
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+	statusCode := resp.StatusCode
+	if statusCode >= 200 && statusCode < 400 {
 		route.Pool.RecordSuccess(backend)
 	} else {
 		route.Pool.RecordFailure(backend)
+		if p.metrics != nil {
+			p.metrics.RecordBackendFailure(backend.ID, "http_error")
+		}
 	}
 
 	copyHeaders(resp.Header, w.Header())
@@ -146,22 +161,61 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}()
 
+	var bytesReceived int64
 	if flusher, ok := w.(http.Flusher); ok {
-		if _, err := io.Copy(flushWriter{w, flusher}, resp.Body); err != nil {
-			fmt.Printf("[PROXY] Error copying response body: %v\n", err)
-		}
+		bytesReceived, _ = io.Copy(countingWriter{flushWriter{w, flusher}, &bytesReceived}, resp.Body)
 	} else {
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			fmt.Printf("[PROXY] Error copying response body: %v\n", err)
-		}
+		bytesReceived, _ = io.Copy(countingWriter{w, &bytesReceived}, resp.Body)
 	}
 	close(done)
 
-	// fmt.Printf("[PROXY] %s %s took %v\n", req.Method, req.URL.Path, time.Since(start))
+	timing.MarkRequestDone()
+	timing.Calculate()
+
+	if p.metrics != nil {
+		p.recordDetailedMetrics(req, route.Prefix, backend.ID, timing, statusCode, bytesSent, bytesReceived)
+	}
+}
+
+func (p *Proxy) recordDetailedMetrics(req *http.Request, routePrefix string, backendID string, timing *TimingInfo, statusCode int, bytesSent, bytesReceived int64) {
+	if p.metrics == nil {
+		return
+	}
+
+	metric := metrics.RequestMetric{
+		Timestamp:     time.Now(),
+		Method:        req.Method,
+		Route:         routePrefix,
+		BackendID:     backendID,
+		StatusCode:    statusCode,
+		BytesSent:     bytesSent,
+		BytesReceived: bytesReceived,
+		Timing: metrics.RequestTiming{
+			DNSLookup:        timing.DNSLookup,
+			TCPConnection:    timing.TCPConnection,
+			TLSHandshake:     timing.TLSHandshake,
+			ServerProcessing: timing.ServerProcessing,
+			ContentTransfer:  timing.ContentTransfer,
+			TTFB:             timing.TTFB,
+			Total:            timing.Total,
+		},
+	}
+
+	p.metrics.RecordDetailedRequest(metric)
+}
+
+func (p *Proxy) recordErrorMetrics(req *http.Request, routePrefix string, backendID string, timing *TimingInfo, statusCode int) {
+	if p.metrics == nil {
+		return
+	}
+
+	timing.MarkRequestDone()
+	timing.Calculate()
+
+	p.recordDetailedMetrics(req, routePrefix, backendID, timing, statusCode, 0, 0)
 }
 
 func stripPrefix(path, prefix string) string {
-
 	if strings.HasSuffix(prefix, "/*") {
 		basePrefix := strings.TrimSuffix(prefix, "/*")
 		stripped := strings.TrimPrefix(path, basePrefix)
@@ -217,8 +271,17 @@ type flushWriter struct {
 
 func (fw flushWriter) Write(p []byte) (int, error) {
 	n, err := fw.ResponseWriter.Write(p)
-	// Explicitly flush the response to ensure the client receives the data immediately
-	// without waiting for the buffer to be full.
 	fw.flusher.Flush()
+	return n, err
+}
+
+type countingWriter struct {
+	w     io.Writer
+	count *int64
+}
+
+func (cw countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	*cw.count += int64(n)
 	return n, err
 }

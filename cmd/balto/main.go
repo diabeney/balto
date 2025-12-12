@@ -9,9 +9,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/diabeney/balto/internal/api/core"
+	"github.com/diabeney/balto/internal/config"
+	"github.com/diabeney/balto/internal/metrics"
 	"github.com/diabeney/balto/internal/proxy"
 	"github.com/diabeney/balto/internal/router"
 	"github.com/diabeney/balto/internal/server"
+	"github.com/diabeney/balto/pkg/utils"
+)
+
+const (
+	__BALTO_CONFIG_PATH string = "configs/balto.config.yaml"
 )
 
 func main() {
@@ -19,12 +27,21 @@ func main() {
 
 	defer stop()
 
-	cfg := []router.InitialRoutes{
-		{Domain: "localhost", PathPrefix: "*", Ports: []string{"8080", "8081", "8082", "8083", "8084"}},
+	cfg, err := config.Load(__BALTO_CONFIG_PATH)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	rt, err := router.BuildFromConfig(cfg)
+	routes := make([]router.InitialRoutes, len(cfg.Services))
+	for i, svc := range cfg.Services {
+		routes[i] = router.InitialRoutes{
+			Domain:     svc.Domain,
+			PathPrefix: svc.PathPrefix,
+			Ports:      svc.Ports,
+		}
+	}
 
+	rt, err := router.BuildFromConfig(routes)
 	if err != nil {
 		log.Fatalf("Failed to build router: %v", err)
 	}
@@ -33,10 +50,34 @@ func main() {
 
 	router.SetCurrent(rt)
 
-	px := proxy.New(router.Current())
+	var metricsCollector *metrics.Collector
+	if cfg.Global.Metrics.Enabled {
+		metricsCollector = metrics.NewCollector()
+		metricsCollector.Register()
+	}
 
-	//TODO: Load port from config
-	srv := server.New(":80", http.HandlerFunc(px.ServeHTTP))
+	px := proxy.NewWithMetrics(router.Current(), metricsCollector)
+
+	srv := server.NewWithMetrics(cfg.Server.Address(), http.HandlerFunc(px.ServeHTTP), cfg, metricsCollector)
+
+	sm := core.GetServiceManager()
+	if sm != nil {
+		services := make([]core.ServiceInfo, len(cfg.Services))
+		for i, svc := range cfg.Services {
+			services[i] = core.ServiceInfo{
+				ID:         utils.HashServiceID(svc.Domain, svc.PathPrefix),
+				Domain:     svc.Domain,
+				PathPrefix: svc.PathPrefix,
+				Ports:      svc.Ports,
+			}
+		}
+
+		err := sm.InitializeFromConfig(services)
+
+		if err != nil {
+			log.Fatalf("Failed to initialize routes from config: %v", err)
+		}
+	}
 
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -47,6 +88,7 @@ func main() {
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
 	defer cancel()
 
 	if rt := router.Current(); rt != nil {
