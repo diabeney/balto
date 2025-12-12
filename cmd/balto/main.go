@@ -71,7 +71,12 @@ func main() {
 				Ports:      svc.Ports,
 			}
 		}
-		_ = sm.InitializeFromConfig(services)
+
+		err := sm.InitializeFromConfig(services)
+
+		if err != nil {
+			log.Fatalf("Failed to initialize routes from config: %v", err)
+		}
 	}
 
 	go func() {
