@@ -1,21 +1,18 @@
 package core
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/diabeney/balto/internal/router"
-	"github.com/diabeney/balto/pkg/broadcast"
 	"github.com/diabeney/balto/pkg/utils"
 )
 
 type ServiceManager struct {
-	mu          sync.RWMutex
-	services    map[string]*ServiceInfo
-	broadcaster *broadcast.Broadcaster
-	startTime   time.Time
+	mu        sync.RWMutex
+	services  map[string]*ServiceInfo
+	startTime time.Time
 }
 
 var (
@@ -23,12 +20,11 @@ var (
 	once           sync.Once
 )
 
-func InitServiceManager(broadcaster *broadcast.Broadcaster) {
+func InitServiceManager() {
 	once.Do(func() {
 		serviceManager = &ServiceManager{
-			services:    make(map[string]*ServiceInfo),
-			broadcaster: broadcaster,
-			startTime:   time.Now(),
+			services:  make(map[string]*ServiceInfo),
+			startTime: time.Now(),
 		}
 	})
 }
@@ -89,17 +85,6 @@ func (sm *ServiceManager) AddService(domain, pathPrefix string, ports []string) 
 		return nil, err
 	}
 
-	if sm.broadcaster != nil {
-		_ = sm.broadcaster.Publish(context.TODO(), broadcast.Event{
-			Type: "service_added",
-			Meta: map[string]any{
-				"service_id": id,
-				"domain":     domain,
-				"path":       pathPrefix,
-			},
-		})
-	}
-
 	return svc, nil
 }
 
@@ -149,18 +134,6 @@ func (sm *ServiceManager) UpdateService(id string, req *ServiceRequest) (*Servic
 			sm.services[id] = oldSvc
 		}
 		return nil, err
-	}
-
-	if sm.broadcaster != nil {
-		_ = sm.broadcaster.Publish(context.TODO(), broadcast.Event{
-			Type: "service_updated",
-			Meta: map[string]any{
-				"service_id": newID,
-				"old_id":     id,
-				"domain":     req.Domain,
-				"path":       req.PathPrefix,
-			},
-		})
 	}
 
 	return svc, nil

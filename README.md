@@ -1,7 +1,7 @@
 Balto: Developer-Focused API Gateway & Load Balancer
 =====================================================
 
-Balto is a lightweight, developer-friendly HTTP reverse proxy and load balancer written in Go. It aims to give you fast, predictable routing based on host and path, with simple configuration, clean code, and a clear operational story. A web dashboard will ship alongside the core to make runtime insights easy.
+Balto is a lightweight, developer-friendly HTTP reverse proxy and load balancer written in Go. It aims to give you fast, predictable routing based on host and path, with simple configuration, clean code, and a clear operational story. For observability, Balto exposes Prometheus metrics that you can visualize with Grafana.
 
 At this stage, Balto is under active development. The core router and proxy are in place with tests; more features like health checks, TLS termination and the full dashboard will follow.
 
@@ -28,7 +28,7 @@ What we aim to achieve next
 - Multiple load balancing algorithms (round-robin, least-connections, weighted, etc.).
 - Active health checks and automatic reintegration of healthy backends.
 - TLS termination (Let’s Encrypt), per-backend TLS options.
-- Metrics (request rates, latency, error rates) exposed to a dashboard.
+- Metrics (request rates, latency, error rates) exposed via Prometheus (Grafana dashboards).
 - Simple YAML configuration with live reload and validation.
 - Production-ready Docker images and Kubernetes support.
 
@@ -40,7 +40,6 @@ Project layout
 - `internal/proxy` — HTTP reverse proxy
 - `internal/server` — HTTP server wrapper with timeouts and graceful shutdown
 - `configs/` — configuration skeleton (`balto.config.yaml`, `services/`)
-- `ui/web` — Next.js dashboard (scaffolded; to be expanded)
 - `.github/workflows/ci.yml` — CI for tests, lint, and formatting check
 - `Makefile` — build, test, run, lint, lint-fix, format, install-hooks
 - `scripts/` — local setup and Git hook installer
@@ -48,10 +47,11 @@ Project layout
 
 Prerequisites
 -------------
-- Go 1.22+
+- Go 1.23+
 - Make
 - git
 - For linting locally: `golangci-lint` (CI runs it regardless)
+- For the full observability stack: Docker + Docker Compose
 
 Install `golangci-lint` (optional but recommended for local hooks):
 
@@ -75,9 +75,56 @@ Run the server:
 
 ```bash
 make run
-# Server listens on :8080
-curl -i http://localhost:8080/health
+# Server listens on :5500 (see configs/balto.config.yaml)
+curl -i http://localhost:5500/health
 ```
+
+Observability (Docker Compose: Balto + Prometheus + Grafana)
+------------------------------------------------------------
+
+```bash
+docker compose up --build
+```
+
+- Watch Balto logs:
+  - `docker compose logs -f --tail=200 balto`
+  - or `make compose-logs`
+
+- Upstream addressing in Docker:
+  - If your `configs/balto.config.yaml` uses port-only targets like `"8080"`, Balto will probe/route to `${BALTO_UPSTREAM_HOST}:8080`.
+  - In `docker-compose.yml` we set `BALTO_UPSTREAM_HOST=host.docker.internal` so Balto can reach services running on your host machine.
+  - If your upstreams are other containers in the same compose network, set `ports` to `service-name:port` (e.g. `"users-api:8080"`) or full URLs (e.g. `"http://users-api:8080"`).
+
+- Balto: `http://localhost:5500`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (login: `admin` / `admin`)
+
+Prometheus scrapes Balto at `GET /balto/metrics`.
+
+What you’ll see in Grafana
+--------------------------
+
+- **Balto (application)**:
+  - Request rate, status code rate, latency (p95), TTFB (p95)
+  - Per-service request rate as a **stacked area** graph (service == `route` label)
+  - Per-backend request rate as a **stacked area** graph (filtered by service)
+  - Balto process CPU and memory (via Prometheus `process_*` / `go_*` collectors)
+
+- **System / container**:
+  - CPU, memory, disk from **node-exporter**
+  - Container metrics from **cAdvisor** (optional; useful when you run upstreams in Docker too)
+
+Note on “host machine” metrics
+------------------------------
+
+If you’re on Docker Desktop (macOS/Windows), node-exporter typically reflects the **Docker VM**, not the full host OS. For production-grade host observability, run node-exporter on the host (or use Grafana Agent / OpenTelemetry Collector) and scrape that instead.
+
+Grafana “graphs-only” view (kiosk mode)
+---------------------------------------
+
+- Default home dashboard is provisioned to **Balto**.
+- For a graphs-only view (no sidebar), open:
+  - `http://localhost:3000/d/balto/balto?kiosk`
 
 Run tests:
 

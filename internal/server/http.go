@@ -10,7 +10,6 @@ import (
 	"github.com/diabeney/balto/internal/config"
 	"github.com/diabeney/balto/internal/health"
 	"github.com/diabeney/balto/internal/metrics"
-	"github.com/diabeney/balto/pkg/broadcast"
 )
 
 type HTTPServer struct {
@@ -18,15 +17,15 @@ type HTTPServer struct {
 	metrics *metrics.Collector
 }
 
-func New(addr string, proxyHandler http.Handler, cfg *config.Config, broadcaster *broadcast.Broadcaster) *HTTPServer {
-	return NewWithMetrics(addr, proxyHandler, cfg, broadcaster, nil)
+func New(addr string, proxyHandler http.Handler, cfg *config.Config) *HTTPServer {
+	return NewWithMetrics(addr, proxyHandler, cfg, nil)
 }
 
-func NewWithMetrics(addr string, proxyHandler http.Handler, cfg *config.Config, broadcaster *broadcast.Broadcaster, m *metrics.Collector) *HTTPServer {
+func NewWithMetrics(addr string, proxyHandler http.Handler, cfg *config.Config, m *metrics.Collector) *HTTPServer {
 	mux := http.NewServeMux()
 
 	mux.Handle("/health", http.HandlerFunc(health.CheckBaltoHealth))
-	api.SetupRoutes(mux, broadcaster)
+	api.SetupRoutes(mux)
 
 	// Start background goroutine to update system metrics periodically if metrics collector is provided
 	if m != nil {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -19,17 +18,16 @@ import (
 	"github.com/diabeney/balto/pkg/utils"
 )
 
+const (
+	__BALTO_CONFIG_PATH string = "configs/balto.config.yaml"
+)
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
 	defer stop()
 
-	configPath := os.Getenv("BALTO_CONFIG")
-	if configPath == "" {
-		configPath = "configs/balto.config.yaml"
-	}
-
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(__BALTO_CONFIG_PATH)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -61,7 +59,7 @@ func main() {
 
 	px := proxy.NewWithMetrics(router.Current(), metricsCollector)
 
-	srv := server.NewWithMetrics(cfg.Server.Address(), http.HandlerFunc(px.ServeHTTP), cfg, nil, metricsCollector)
+	srv := server.NewWithMetrics(cfg.Server.Address(), http.HandlerFunc(px.ServeHTTP), cfg, metricsCollector)
 
 	sm := core.GetServiceManager()
 	if sm != nil {

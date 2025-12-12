@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
@@ -17,6 +17,6 @@ RUN apk --no-cache add ca-certificates
 
 COPY --from=builder /balto /balto
 
-EXPOSE 8080
+EXPOSE 5500
 
 ENTRYPOINT ["/balto"]

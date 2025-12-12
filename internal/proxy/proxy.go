@@ -123,7 +123,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	resp, err := p.client.Do(outReq)
-	timing.RequestDone = time.Now()
+	timing.MarkRequestDone()
 	timing.Calculate()
 
 	if err != nil {
@@ -169,7 +169,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	close(done)
 
-	timing.RequestDone = time.Now()
+	timing.MarkRequestDone()
 	timing.Calculate()
 
 	if p.metrics != nil {
@@ -209,7 +209,7 @@ func (p *Proxy) recordErrorMetrics(req *http.Request, routePrefix string, backen
 		return
 	}
 
-	timing.RequestDone = time.Now()
+	timing.MarkRequestDone()
 	timing.Calculate()
 
 	p.recordDetailedMetrics(req, routePrefix, backendID, timing, statusCode, 0, 0)

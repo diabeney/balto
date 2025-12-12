@@ -1,6 +1,6 @@
 global:
   load_balancing:
-    algorithm: round-robin
+    algorithm: weighted-rr
   tls:
     enabled: false
     cert_file: ""
@@ -24,4 +24,4 @@ server:
 services:
   - domain: localhost
     path_prefix: "*"
-    ports: ["8080", "8081", "8082", "8083", "8084"]
+    ports: ["8080", "8081", "8082"]

@@ -2,11 +2,13 @@ package metrics
 
 import (
 	"net/http"
+	"os"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -16,6 +18,9 @@ var (
 )
 
 type Collector struct {
+	registry     *prometheus.Registry
+	registerOnce sync.Once
+
 	requestsTotal        *prometheus.CounterVec
 	backendFailuresTotal *prometheus.CounterVec
 	probeFailuresTotal   *prometheus.CounterVec
@@ -36,7 +41,6 @@ type Collector struct {
 	requestBytesTotal  *prometheus.CounterVec
 	responseBytesTotal *prometheus.CounterVec
 
-	store        *TimeSeriesStore
 	startTime    time.Time
 	systemTicker *time.Ticker
 	stopCh       chan struct{}
@@ -46,6 +50,7 @@ func NewCollector() *Collector {
 	latencyBuckets := []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}
 
 	c := &Collector{
+		registry: prometheus.NewRegistry(),
 		requestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "balto_requests_total",
@@ -164,7 +169,6 @@ func NewCollector() *Collector {
 			},
 			[]string{"method", "route", "backend_id"},
 		),
-		store:     NewTimeSeriesStore(1, 60),
 		startTime: time.Now(),
 		stopCh:    make(chan struct{}),
 	}
@@ -173,30 +177,36 @@ func NewCollector() *Collector {
 }
 
 func (c *Collector) Register() {
-	prometheus.MustRegister(
-		c.requestsTotal,
-		c.backendFailuresTotal,
-		c.probeFailuresTotal,
-		c.backendActiveConnections,
-		c.backendHealthy,
-		c.systemMemoryBytes,
-		c.systemGoroutines,
-		c.requestDurationSeconds,
-		c.ttfbSeconds,
-		c.dnsLookupSeconds,
-		c.tcpConnectionSeconds,
-		c.tlsHandshakeSeconds,
-		c.serverProcessingSeconds,
-		c.contentTransferSeconds,
-		c.requestBytesTotal,
-		c.responseBytesTotal,
-	)
+	c.registerOnce.Do(func() {
+		c.registry.MustRegister(
+			collectors.NewGoCollector(),
+			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+				PidFn: func() (int, error) { return os.Getpid(), nil },
+			}),
+			c.requestsTotal,
+			c.backendFailuresTotal,
+			c.probeFailuresTotal,
+			c.backendActiveConnections,
+			c.backendHealthy,
+			c.systemMemoryBytes,
+			c.systemGoroutines,
+			c.requestDurationSeconds,
+			c.ttfbSeconds,
+			c.dnsLookupSeconds,
+			c.tcpConnectionSeconds,
+			c.tlsHandshakeSeconds,
+			c.serverProcessingSeconds,
+			c.contentTransferSeconds,
+			c.requestBytesTotal,
+			c.responseBytesTotal,
+		)
 
-	globalMu.Lock()
-	globalCollector = c
-	globalMu.Unlock()
+		globalMu.Lock()
+		globalCollector = c
+		globalMu.Unlock()
 
-	c.startSystemMetricsCollection()
+		c.startSystemMetricsCollection()
+	})
 }
 
 func (c *Collector) startSystemMetricsCollection() {
@@ -224,20 +234,6 @@ func (c *Collector) collectSystemMetrics() {
 	c.systemMemoryBytes.WithLabelValues("heap_inuse").Set(float64(m.HeapInuse))
 	c.systemMemoryBytes.WithLabelValues("stack_inuse").Set(float64(m.StackInuse))
 	c.systemGoroutines.Set(float64(runtime.NumGoroutine()))
-
-	if c.store != nil {
-		c.store.RecordSystemMetrics(SystemMetrics{
-			Timestamp:    time.Now(),
-			Goroutines:   runtime.NumGoroutine(),
-			HeapAlloc:    m.HeapAlloc,
-			HeapSys:      m.HeapSys,
-			HeapInuse:    m.HeapInuse,
-			StackInuse:   m.StackInuse,
-			NumGC:        m.NumGC,
-			GCPauseTotal: m.PauseTotalNs,
-			LastGCPause:  m.PauseNs[(m.NumGC+255)%256],
-		})
-	}
 }
 
 func GetGlobal() *Collector {
@@ -247,11 +243,7 @@ func GetGlobal() *Collector {
 }
 
 func (c *Collector) Handler() http.Handler {
-	return promhttp.Handler()
-}
-
-func (c *Collector) Store() *TimeSeriesStore {
-	return c.store
+	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})
 }
 
 func (c *Collector) RecordRequest(method, route, backendID, statusCode string, duration time.Duration) {
@@ -267,10 +259,9 @@ func (c *Collector) RecordRequest(method, route, backendID, statusCode string, d
 
 func (c *Collector) RecordDetailedRequest(metric RequestMetric) {
 	labels := prometheus.Labels{
-		"method":      metric.Method,
-		"route":       metric.Route,
-		"backend_id":  metric.BackendID,
-		"status_code": string(rune(metric.StatusCode + '0')),
+		"method":     metric.Method,
+		"route":      metric.Route,
+		"backend_id": metric.BackendID,
 	}
 
 	statusStr := intToStatusStr(metric.StatusCode)
@@ -296,10 +287,6 @@ func (c *Collector) RecordDetailedRequest(metric RequestMetric) {
 
 	c.requestBytesTotal.With(timingLabels).Add(float64(metric.BytesSent))
 	c.responseBytesTotal.With(timingLabels).Add(float64(metric.BytesReceived))
-
-	if c.store != nil {
-		c.store.RecordRequest(metric)
-	}
 }
 
 func intToStatusStr(code int) string {
@@ -323,9 +310,6 @@ func (c *Collector) RecordProbeFailure(backendID string) {
 
 func (c *Collector) SetBackendActiveConnections(backendID string, count uint64) {
 	c.backendActiveConnections.WithLabelValues(backendID).Set(float64(count))
-	if c.store != nil {
-		c.store.SetBackendActiveConnections(backendID, "", int64(count))
-	}
 }
 
 func (c *Collector) SetBackendHealthy(backendID, route string, healthy bool) {
@@ -334,40 +318,10 @@ func (c *Collector) SetBackendHealthy(backendID, route string, healthy bool) {
 		value = 1.0
 	}
 	c.backendHealthy.WithLabelValues(backendID, route).Set(value)
-	if c.store != nil {
-		c.store.SetBackendHealth(backendID, route, healthy)
-	}
 }
 
 func (c *Collector) RecordSystemMetrics() {
 	c.collectSystemMetrics()
-}
-
-func (c *Collector) GetAggregatedMetrics(windowSeconds int) AggregatedMetrics {
-	if c.store == nil {
-		return AggregatedMetrics{}
-	}
-	return c.store.GetAggregated(windowSeconds)
-}
-
-func (c *Collector) GetTimeSeries(name string, windowMinutes int) TimeSeries {
-	if c.store == nil {
-		return TimeSeries{}
-	}
-	return c.store.GetTimeSeries(name, windowMinutes)
-}
-
-func (c *Collector) Subscribe() chan MetricsEvent {
-	if c.store == nil {
-		return nil
-	}
-	return c.store.Subscribe()
-}
-
-func (c *Collector) Unsubscribe(ch chan MetricsEvent) {
-	if c.store != nil {
-		c.store.Unsubscribe(ch)
-	}
 }
 
 func (c *Collector) Stop() {
