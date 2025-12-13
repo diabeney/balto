@@ -7,7 +7,7 @@ test:
 	go test ./... -v
 
 run:
-	docker compose up --build
+	docker compose up --build -d
 
 lint:
 	golangci-lint run

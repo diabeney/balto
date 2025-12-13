@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -171,7 +172,7 @@ func NewRouter() *Router {
 	return &Router{
 		hosts:          make(map[Host]*node),
 		healthcheckers: make(map[string]*health.Healthchecker),
-		algorithm:      "round-robin",
+		algorithm:      balancer.ROUND_ROBIN,
 	}
 }
 
@@ -192,7 +193,12 @@ func (r *Router) Add(host Host, path string, services []*url.URL) *Router {
 	normPath := normalizePrefix(path)
 	segments := pathToSegments(normPath)
 
-	bal := balancer.NewRoundRobin()
+	bal, err := balancer.InitBalancerAlgo()
+
+	if err != nil {
+		log.Fatalf("Balancer initialization threw an error: %v", err)
+	}
+
 	poolCfg := &backendpool.PoolConfig{
 		HealthThreshold:            10,
 		ProbeHealthThreshold:       10,
@@ -264,7 +270,7 @@ func (r *Router) Lookup(host Host, path string) (Route, Params, bool) {
 //
 // Individual changes to a pool's backend list (add/remove backends)
 // are handled automatically by the healthchecker's internal reconciliation loop.
-func (r *Router) Start() {
+func (r *Router) StartHealthCheckers() {
 	for _, hc := range r.healthcheckers {
 		// It is safe to call Start() multiple times on the healthchecker
 		// because Healthchecker struct has a 'started' bool guard.
@@ -318,7 +324,7 @@ func RebuildFromServices(services []ServiceInfo) error {
 		newRouter = newRouter.Add(Host(svc.Domain), svc.PathPrefix, parsedServices)
 	}
 
-	newRouter.Start()
+	newRouter.StartHealthCheckers()
 	oldRouter := Current()
 	SetCurrent(newRouter)
 

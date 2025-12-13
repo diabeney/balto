@@ -18,17 +18,14 @@ import (
 	"github.com/diabeney/balto/pkg/utils"
 )
 
-const (
-	__BALTO_CONFIG_PATH string = "configs/balto.config.yaml"
-)
-
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
 	defer stop()
 
-	cfg, err := config.Load(__BALTO_CONFIG_PATH)
+	cfg, err := config.Load()
 	if err != nil {
+		// !TODO: Test and see if we really need to terminate the process if the config loader throws an error. The app should work with the default configs
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
@@ -46,7 +43,7 @@ func main() {
 		log.Fatalf("Failed to build router: %v", err)
 	}
 
-	rt.Start()
+	rt.StartHealthCheckers()
 
 	router.SetCurrent(rt)
 
