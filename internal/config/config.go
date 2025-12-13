@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	__BALTO_CONFIG_PATH       string = "configs/balto.config.yaml"
 	__BALTO_DEFAULT_LOGS_PATH string = "/var/log/balto/balto.log"
 	__BALTO_DEFAULT_PORT      string = ":5500"
 	__BALTO_DEFAULT_ALGO      string = "round-robbin"
@@ -104,8 +105,8 @@ func Default() *Config {
 	}
 }
 
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+func Load() (*Config, error) {
+	data, err := os.ReadFile(__BALTO_CONFIG_PATH)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Default(), nil
