@@ -6,8 +6,7 @@ global:
     cert_file: ""
     key_file: ""
   logging:
-    level: info
-    path: /var/log/balto/balto.log
+    level: ["info", "warn", "debug", "error"]
   metrics:
     enabled: true
   cors:

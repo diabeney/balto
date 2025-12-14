@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/diabeney/balto/internal/metrics"
 	"github.com/diabeney/balto/internal/router"
+	"github.com/diabeney/balto/pkg/logger"
 )
 
 type Proxy struct {
@@ -133,7 +133,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			p.recordDetailedMetrics(req, route.Prefix, backend.ID, timing, http.StatusBadGateway, bytesSent, 0)
 		}
 		http.Error(w, "bad gateway", http.StatusBadGateway)
-		fmt.Printf("[PROXY] %s %s -> failed: %v\n", req.Host, req.URL.Path, err)
+		logger.Error(logger.BALTO_PROXY, "Request to internal service failed", "host", req.Host, "url", req.URL.Path, "error", err)
 		return
 	}
 	defer resp.Body.Close()

@@ -110,7 +110,7 @@ func TestPoolCircuitIntegration(t *testing.T) {
 		SuccessThreshold:    1,
 		Timeout:             100 * time.Millisecond,
 		MaxHalfOpenRequests: 1,
-	})
+	}, "cb")
 
 	if b.Circuit == nil {
 		t.Fatal("Circuit breaker not initialized")

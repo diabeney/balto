@@ -9,10 +9,9 @@ import (
 )
 
 const (
-	__BALTO_CONFIG_PATH       string = "configs/balto.config.yaml"
-	__BALTO_DEFAULT_LOGS_PATH string = "/var/log/balto/balto.log"
-	__BALTO_DEFAULT_PORT      string = ":5500"
-	__BALTO_DEFAULT_ALGO      string = "round-robbin"
+	__BALTO_CONFIG_PATH  string = "configs/balto.config.yaml"
+	__BALTO_DEFAULT_PORT string = ":5500"
+	__BALTO_DEFAULT_ALGO string = "round-robin"
 )
 
 type Config struct {
@@ -41,8 +40,8 @@ type TLSConfig struct {
 }
 
 type LoggingConfig struct {
-	Level string `yaml:"level"`
-	Path  string `yaml:"path"`
+	Level []string `yaml:"level"`
+	Path  string   `yaml:"path"`
 }
 
 type MetricsConfig struct {
@@ -82,8 +81,8 @@ func Default() *Config {
 				KeyFile:  "",
 			},
 			Logging: LoggingConfig{
-				Level: "info",
-				Path:  __BALTO_DEFAULT_LOGS_PATH,
+				Level: []string{"info"},
+				Path:  "",
 			},
 			Metrics: MetricsConfig{
 				Enabled: true,

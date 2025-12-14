@@ -12,7 +12,7 @@ func TestBreakerTransitions(t *testing.T) {
 		Timeout:             100 * time.Millisecond,
 		MaxHalfOpenRequests: 1,
 	}
-	cb := New(cfg)
+	cb := New(cfg, "test")
 
 	if cb.State() != Closed {
 		t.Errorf("expected Closed, got %v", cb.State())
@@ -79,7 +79,7 @@ func TestBreakerSuccessInOpen(t *testing.T) {
 		SuccessThreshold: 1,
 		Timeout:          1 * time.Hour,
 	}
-	cb := New(cfg)
+	cb := New(cfg, "test")
 
 	cb.RecordFailure()
 	if cb.State() != Open {
@@ -105,7 +105,7 @@ func TestBreakerRecordSuccessIgnoredWhenOpen(t *testing.T) {
 		SuccessThreshold: 1,
 		Timeout:          1 * time.Second,
 	}
-	cb := New(cfg)
+	cb := New(cfg, "test")
 
 	cb.RecordFailure()
 	if cb.State() != Open {
@@ -125,7 +125,7 @@ func TestBreakerHalfOpenLimited(t *testing.T) {
 		Timeout:             10 * time.Millisecond,
 		MaxHalfOpenRequests: 1,
 	}
-	cb := New(cfg)
+	cb := New(cfg, "test")
 
 	cb.RecordFailure()
 	if cb.State() != Open {
@@ -154,7 +154,7 @@ func TestBreakerOpenTimeoutBackoff(t *testing.T) {
 		Timeout:             5 * time.Millisecond,
 		MaxHalfOpenRequests: 1,
 	}
-	cb := New(cfg)
+	cb := New(cfg, "test")
 
 	if got := time.Duration(cb.openTimeout.Load()); got != cfg.Timeout {
 		t.Fatalf("expected initial open timeout %v, got %v", cfg.Timeout, got)

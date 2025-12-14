@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/diabeney/balto/pkg/logger"
 )
 
 type State uint32
@@ -46,10 +48,11 @@ type Breaker struct {
 	failures  uint64 // Consecutive failures in Closed state.
 	successes uint64 // Consecutive successes in Half-Open state.
 
-	cfg Config
+	cfg       Config
+	backendID string // ID of the backend this breaker protects
 }
 
-func New(cfg Config) *Breaker {
+func New(cfg Config, backendID string) *Breaker {
 	if cfg.FailureThreshold == 0 {
 		cfg.FailureThreshold = 5
 	}
@@ -64,7 +67,8 @@ func New(cfg Config) *Breaker {
 	}
 
 	b := &Breaker{
-		cfg: cfg,
+		cfg:       cfg,
+		backendID: backendID,
 	}
 	b.state.Store(uint32(Closed))
 	b.openTimeout.Store(cfg.Timeout.Nanoseconds())
@@ -177,6 +181,10 @@ func (b *Breaker) transitionToOpenLocked() {
 	b.failures = 0
 	b.halfOpenInFlight.Store(0)
 	b.adjustOpenTimeoutLocked(increaseTimeout)
+
+	logger.Warn(logger.BALTO_CIRCUIT_BREAKER, "Circuit breaker opened",
+		"backend_id", b.backendID,
+		"failure_threshold", b.cfg.FailureThreshold)
 }
 
 func (b *Breaker) transitionToHalfOpenLocked() {
@@ -186,6 +194,10 @@ func (b *Breaker) transitionToHalfOpenLocked() {
 	b.successes = 0
 	b.halfOpenInFlight.Store(0)
 	b.adjustOpenTimeoutLocked(resetTimeout)
+
+	logger.Info(logger.BALTO_CIRCUIT_BREAKER, "Circuit breaker half-open (probing)",
+		"backend_id", b.backendID,
+		"timeout_seconds", int(b.cfg.Timeout.Seconds()))
 }
 
 func (b *Breaker) transitionToClosedLocked() {
@@ -194,6 +206,10 @@ func (b *Breaker) transitionToClosedLocked() {
 	b.successes = 0
 	b.halfOpenInFlight.Store(0)
 	b.adjustOpenTimeoutLocked(resetTimeout)
+
+	logger.Info(logger.BALTO_CIRCUIT_BREAKER, "Circuit breaker closed",
+		"backend_id", b.backendID,
+		"success_threshold", b.cfg.SuccessThreshold)
 }
 
 // tryAcquireHalfOpenSlot attempts to atomically increment the in-flight counter.

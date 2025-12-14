@@ -141,7 +141,7 @@ func NewTimedTransport() *TimedTransport {
 		Base: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
-				Timeout:   5 * time.Second,
+				Timeout:   10 * time.Second,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
 			MaxIdleConns:          1000,

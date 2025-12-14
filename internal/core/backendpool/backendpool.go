@@ -25,7 +25,7 @@ func NewBackend(id string, u *url.URL, weight uint32, cbCfg circuit.Config) *cor
 		URL:     u,
 		Weight:  weight,
 		Meta:    &core.BackendMetadata{},
-		Circuit: circuit.New(cbCfg),
+		Circuit: circuit.New(cbCfg, id),
 	}
 	b.SetHealthy(true)
 	return b
