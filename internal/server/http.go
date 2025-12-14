@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/diabeney/balto/internal/config"
 	"github.com/diabeney/balto/internal/health"
 	"github.com/diabeney/balto/internal/metrics"
+	"github.com/diabeney/balto/pkg/logger"
 )
 
 type HTTPServer struct {
@@ -42,19 +42,19 @@ func NewWithMetrics(addr string, proxyHandler http.Handler, cfg *config.Config, 
 
 	readTimeout, err := cfg.Global.Timeouts.ReadDuration()
 	if err != nil {
-		log.Printf("Invalid read timeout config, using default: %v", err)
+		logger.Warn(logger.BALTO_SERVER, "Invalid read timeout config, using default", "error", err)
 		readTimeout = 5 * time.Second
 	}
 
 	writeTimeout, err := cfg.Global.Timeouts.WriteDuration()
 	if err != nil {
-		log.Printf("Invalid write timeout config, using default: %v", err)
+		logger.Warn(logger.BALTO_SERVER, "Invalid write timeout config, using default", "error", err)
 		writeTimeout = 5 * time.Second
 	}
 
 	idleTimeout, err := cfg.Global.Timeouts.IdleDuration()
 	if err != nil {
-		log.Printf("Invalid idle timeout config, using default: %v", err)
+		logger.Warn(logger.BALTO_SERVER, "Invalid idle timeout config, using default", "error", err)
 		idleTimeout = 30 * time.Second
 	}
 
@@ -72,7 +72,7 @@ func NewWithMetrics(addr string, proxyHandler http.Handler, cfg *config.Config, 
 }
 
 func (h *HTTPServer) Start() error {
-	log.Printf("Starting Balto HTTP server on %s", h.server.Addr)
+	logger.Info(logger.BALTO_SERVER, "Starting Balto HTTP server", "address", h.server.Addr)
 	err := h.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		return err
@@ -81,6 +81,6 @@ func (h *HTTPServer) Start() error {
 }
 
 func (h *HTTPServer) Stop(ctx context.Context) error {
-	log.Printf("Shutting down Balto HTTP server...")
+	logger.Info(logger.BALTO_SERVER, "Shutting down Balto HTTP server...")
 	return h.server.Shutdown(ctx)
 }

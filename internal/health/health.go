@@ -3,7 +3,6 @@ package health
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/diabeney/balto/internal/core"
 	"github.com/diabeney/balto/internal/core/backendpool"
+	"github.com/diabeney/balto/pkg/logger"
 )
 
 func CheckBaltoHealth(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +222,7 @@ func (h *Healthchecker) probeHTTP(ctx context.Context, b *core.Backend, path str
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL.String(), nil)
 	if err != nil {
-		log.Printf("Error creating request for %s: %v", probeURL.String(), err)
+		logger.Warn(logger.BALTO_HEALTHCHECKER, "Error creating request", "url", probeURL.String(), "error", err)
 		return
 	}
 

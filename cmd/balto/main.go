@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 	"github.com/diabeney/balto/internal/proxy"
 	"github.com/diabeney/balto/internal/router"
 	"github.com/diabeney/balto/internal/server"
+	"github.com/diabeney/balto/pkg/logger"
 	"github.com/diabeney/balto/pkg/utils"
 )
 
@@ -22,12 +22,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
 	defer stop()
-
 	cfg, err := config.Load()
 	if err != nil {
 		// !TODO: Test and see if we really need to terminate the process if the config loader throws an error. The app should work with the default configs
 		log.Fatalf("Failed to load config: %v", err)
 	}
+
+	logger.Init(&logger.Config{
+		Level: cfg.Global.Logging.Level,
+		Path:  cfg.Global.Logging.Path,
+	})
 
 	routes := make([]router.InitialRoutes, len(cfg.Services))
 	for i, svc := range cfg.Services {
@@ -89,15 +93,15 @@ func main() {
 	defer cancel()
 
 	if rt := router.Current(); rt != nil {
-		fmt.Println("Stopping all health checkers...")
+		logger.Info(logger.BALTO_SERVER, "Stopping all health checkers...")
 		if err := rt.Stop(); err != nil {
-			fmt.Printf("Error stopping router health chckers: %v", err)
+			logger.Error(logger.BALTO_SERVER, "Error stopping router health checkers", "error", err)
 		}
 	}
 
 	if err := srv.Stop(shutdownCtx); err != nil {
-		log.Printf("Shutdown error: %v", err)
+		logger.Error(logger.BALTO_SERVER, "Shutdown error", "error", err)
 	}
 
-	log.Println("Balto server stopped.")
+	logger.Info(logger.BALTO_SERVER, "Balto server stopped.")
 }

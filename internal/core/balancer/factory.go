@@ -8,6 +8,7 @@ import (
 	"github.com/diabeney/balto/internal/core/balancer/leastconn"
 	"github.com/diabeney/balto/internal/core/balancer/roundrobin"
 	"github.com/diabeney/balto/internal/core/balancer/weightedrr"
+	"github.com/diabeney/balto/pkg/logger"
 )
 
 const (
@@ -17,17 +18,17 @@ const (
 )
 
 func NewLeastConnections() Balancer {
-	fmt.Println("[BALANCER]: Initialized with LC")
+	logger.Info(logger.BALTO_BALANCER, "Initialized with least connections balancer")
 	return leastconn.New()
 }
 
 func NewRoundRobin() Balancer {
-	fmt.Println("[BALANCER]: Initialized with RR")
+	logger.Info(logger.BALTO_BALANCER, "Initialized with round robin balancer")
 	return roundrobin.New()
 }
 
 func NewWeightedRR() Balancer {
-	fmt.Println("[BALANCER]: Initialized with WRR")
+	logger.Info(logger.BALTO_BALANCER, "Initialized with weighted round robin balancer")
 	return weightedrr.New()
 }
 

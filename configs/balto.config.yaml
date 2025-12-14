@@ -1,13 +1,12 @@
 global:
   load_balancing:
-    algorithm: round-robi
+    algorithm: round-robin
   tls:
     enabled: false
     cert_file: ""
     key_file: ""
   logging:
-    level: info
-    path: /var/log/balto/balto.log
+    level: ["info", "warn", "debug", "error"]
   metrics:
     enabled: true
   cors:

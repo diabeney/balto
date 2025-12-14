@@ -1,7 +1,6 @@
 package backendpool
 
 import (
-	"log"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -11,6 +10,7 @@ import (
 	"github.com/diabeney/balto/internal/core/balancer"
 	"github.com/diabeney/balto/internal/core/circuit"
 	"github.com/diabeney/balto/internal/metrics"
+	"github.com/diabeney/balto/pkg/logger"
 )
 
 func updateBackendHealthMetric(backendID, route string, healthy bool) {
@@ -25,7 +25,7 @@ func NewBackend(id string, u *url.URL, weight uint32, cbCfg circuit.Config) *cor
 		URL:     u,
 		Weight:  weight,
 		Meta:    &core.BackendMetadata{},
-		Circuit: circuit.New(cbCfg),
+		Circuit: circuit.New(cbCfg, id),
 	}
 	b.SetHealthy(true)
 	return b
@@ -233,7 +233,7 @@ func (p *Pool) RecordFailure(b *core.Backend) {
 	}
 	if b.Meta.PassiveFailCount.Load() >= threshold {
 		if b.SetHealthy(false) {
-			log.Printf("BackendDown: (%s) is now unhealthy (threshold reached)", b.URL)
+			logger.Warn(logger.BALTO_BACKENDPOOL, "Backend marked unhealthy", "backend_id", b.ID)
 			updateBackendHealthMetric(b.ID, "", false)
 		}
 	}
@@ -253,7 +253,7 @@ func (p *Pool) CheckHealth(b *core.Backend) {
 	probeThreshold := probeThreshold(cfg)
 	if passive >= passiveThreshold || probe >= probeThreshold {
 		if b.SetHealthy(false) {
-			log.Printf("BackendDown: (%s) is now unhealthy (check health)", b.URL)
+			logger.Warn(logger.BALTO_BACKENDPOOL, "Backend marked unhealthy", "backend_id", b.ID, "host", b.URL.Host)
 			updateBackendHealthMetric(b.ID, "", false)
 		}
 	}
@@ -265,7 +265,7 @@ func (p *Pool) ResetHealth(b *core.Backend) {
 	}
 	b.Meta.ResetAllFailCounts()
 	if b.SetHealthy(true) {
-		log.Printf("BackendRecovered: (%s) health reset manually", b.URL)
+		logger.Info(logger.BALTO_BACKENDPOOL, "Backend marked healthy", "backend_id", b.ID, "route", b.URL.Path)
 	}
 }
 
@@ -297,7 +297,7 @@ func (p *Pool) MarkHealthy(b *core.Backend) {
 	if b.Meta.ProbeSuccessCount.Load() >= recoveryThreshold {
 		if !b.IsHealthy() {
 			if b.SetHealthy(true) {
-				log.Printf("BackendRecovered: (%s) marked healthy by Probe", b.URL)
+				logger.Info(logger.BALTO_BACKENDPOOL, "Backend recovered", "backend_id", b.ID, "route", b.URL.Path)
 				updateBackendHealthMetric(b.ID, "", true)
 			}
 		}
@@ -325,7 +325,7 @@ func (p *Pool) MarkUnhealthy(b *core.Backend) {
 	}
 	if b.Meta.ProbeFailCount.Load() >= probeThreshold(cfg) {
 		if b.SetHealthy(false) {
-			log.Printf("BackendDown: (%s) marked unhealthy by probe", b.URL)
+			logger.Warn(logger.BALTO_HEALTHCHECKER, "Backend marked unhealthy", "backend_id", b.ID, "host", b.URL.Host)
 			updateBackendHealthMetric(b.ID, "", false)
 		}
 	}
