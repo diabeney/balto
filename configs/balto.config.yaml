@@ -1,6 +1,6 @@
 global:
   load_balancing:
-    algorithm: round-robi
+    algorithm: round-robin
   tls:
     enabled: false
     cert_file: ""
